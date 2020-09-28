@@ -18,7 +18,7 @@ use aarch64::gic::GICDevice;
 use std::collections::HashMap;
 use std::ffi::CStr;
 use std::fmt::Debug;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use vm_memory::{
     Address, GuestAddress, GuestAddressSpace, GuestMemory, GuestMemoryAtomic, GuestMemoryMmap,
     GuestUsize,
@@ -118,7 +118,7 @@ pub fn arch_memory_regions(size: GuestUsize) -> Vec<(GuestAddress, usize, Region
 /// * `num_cpus` - Number of virtual CPUs the guest will have.
 #[allow(clippy::too_many_arguments)]
 pub fn configure_system<T: DeviceInfoForFDT + Clone + Debug, S: ::std::hash::BuildHasher>(
-    vm: &Arc<dyn hypervisor::Vm>,
+    vm: &Arc<Mutex<dyn hypervisor::Vm>>,
     guest_mem: &GuestMemoryMmap,
     cmdline_cstring: &CStr,
     vcpu_count: u64,

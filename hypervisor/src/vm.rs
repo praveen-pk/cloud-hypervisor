@@ -224,6 +224,8 @@ pub trait VmmOps: Send + Sync {
     fn guest_mem_read(&self, buf: &mut [u8], gpa: u64) -> vm::Result<usize>;
     fn mmio_read(&self, addr: u64, data: &mut [u8]) -> vm::Result<()>;
     fn mmio_write(&self, addr: u64, data: &[u8]) -> vm::Result<()>;
+    #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, addr: u64, data: &mut [u8]) -> vm::Result<()>;
+    #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, addr: u64, data: &[u8]) -> vm::Result<()>;
 }

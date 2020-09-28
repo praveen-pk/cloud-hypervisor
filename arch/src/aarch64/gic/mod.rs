@@ -74,7 +74,7 @@ pub mod kvm {
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
     use std::boxed::Box;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     /// Trait for GIC devices.
     pub trait KvmGICDevice: Send + Sync + GICDevice {
@@ -89,19 +89,21 @@ pub mod kvm {
 
         /// Setup the device-specific attributes
         fn init_device_attributes(
-            vm: &Arc<dyn hypervisor::Vm>,
+            vm: &Arc<Mutex<dyn hypervisor::Vm>>,
             gic_device: &dyn GICDevice,
         ) -> Result<()>;
 
         /// Initialize a GIC device
-        fn init_device(vm: &Arc<dyn hypervisor::Vm>) -> Result<Arc<dyn hypervisor::Device>> {
+        fn init_device(vm: &Arc<Mutex<dyn hypervisor::Vm>>) -> Result<Arc<dyn hypervisor::Device>> {
             let mut gic_device = kvm_bindings::kvm_create_device {
                 type_: Self::version(),
                 fd: 0,
                 flags: 0,
             };
 
-            vm.create_device(&mut gic_device)
+            vm.lock()
+                .unwrap()
+                .create_device(&mut gic_device)
                 .map_err(super::Error::CreateGIC)
         }
 
@@ -177,7 +179,7 @@ pub mod kvm {
         }
 
         /// Method to initialize the GIC device
-        fn new(vm: &Arc<dyn hypervisor::Vm>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
+        fn new(vm: &Arc<Mutex<dyn hypervisor::Vm>>, vcpu_count: u64) -> Result<Box<dyn GICDevice>> {
             let vgic_fd = Self::init_device(vm)?;
 
             let device = Self::create_device(vgic_fd, vcpu_count);
@@ -195,7 +197,7 @@ pub mod kvm {
     /// It will try to create by default a GICv3 device. If that fails it will try
     /// to fall-back to a GICv2 device.
     pub fn create_gic(
-        vm: &Arc<dyn hypervisor::Vm>,
+        vm: &Arc<Mutex<dyn hypervisor::Vm>>,
         vcpu_count: u64,
         its_required: bool,
     ) -> Result<Box<dyn GICDevice>> {

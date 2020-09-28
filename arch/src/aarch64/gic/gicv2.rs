@@ -10,7 +10,7 @@ pub mod kvm {
     use crate::layout;
     use hypervisor::kvm::kvm_bindings;
     use std::convert::TryInto;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
 
     /// Represent a GIC v2 device
     pub struct KvmGICv2 {
@@ -112,7 +112,7 @@ pub mod kvm {
         }
 
         fn init_device_attributes(
-            _vm: &Arc<dyn hypervisor::Vm>,
+            _vm: &Arc<Mutex<dyn hypervisor::Vm>>,
             gic_device: &dyn GICDevice,
         ) -> Result<()> {
             /* Setting up the distributor attribute.

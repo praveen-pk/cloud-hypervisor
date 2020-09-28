@@ -1576,7 +1576,7 @@ impl VmmOps for Vm {
             .write(addr, data)
             .map_err(|e| HypervisorVmError::MmioBusWrite(e.into()))
     }
-
+    #[cfg(target_arch = "x86_64")]
     fn pio_read(&self, addr: u64, data: &mut [u8]) -> hypervisor::vm::Result<()> {
         self.device_manager
             .lock()
@@ -1585,7 +1585,7 @@ impl VmmOps for Vm {
             .read(addr, data)
             .map_err(|e| HypervisorVmError::IoBusRead(e.into()))
     }
-
+    #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
         self.device_manager
             .lock()

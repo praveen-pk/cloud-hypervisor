@@ -299,7 +299,7 @@ impl Vcpu {
     /// * `cpuid` - (x86_64) CpuId, wrapper over the `kvm_cpuid2` structure.
     pub fn configure(
         &mut self,
-        #[cfg(target_arch = "aarch64")] vm: &Arc<dyn hypervisor::Vm>,
+        #[cfg(target_arch = "aarch64")] vm: &Arc<Mutex<dyn hypervisor::Vm>>,
         kernel_entry_point: Option<EntryPoint>,
         vm_memory: &GuestMemoryAtomic<GuestMemoryMmap>,
         #[cfg(target_arch = "x86_64")] cpuid: CpuId,
@@ -340,11 +340,13 @@ impl Vcpu {
 
     /// Initializes an aarch64 specific vcpu for booting Linux.
     #[cfg(target_arch = "aarch64")]
-    pub fn init(&self, vm: &Arc<dyn hypervisor::Vm>) -> Result<()> {
+    pub fn init(&self, vm: &Arc<Mutex<dyn hypervisor::Vm>>) -> Result<()> {
         let mut kvi: kvm_bindings::kvm_vcpu_init = kvm_bindings::kvm_vcpu_init::default();
 
         // This reads back the kernel's preferred target type.
-        vm.get_preferred_target(&mut kvi)
+        vm.lock()
+            .unwrap()
+            .get_preferred_target(&mut kvi)
             .map_err(Error::VcpuArmPreferredTarget)?;
         // We already checked that the capability is supported.
         kvi.features[0] |= 1 << kvm_bindings::KVM_ARM_VCPU_PSCI_0_2;
@@ -372,6 +374,7 @@ impl Vcpu {
                     }
                     Ok(true)
                 }
+                #[cfg(target_arch = "x86_64")]
                 VmExit::LogDebugPort(data) => {
                     self.log_debug_ioport(data);
                     Ok(true)

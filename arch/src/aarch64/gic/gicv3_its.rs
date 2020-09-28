@@ -4,7 +4,7 @@
 pub mod kvm {
     use std::any::Any;
     use std::convert::TryInto;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::{boxed::Box, result};
     type Result<T> = result::Result<T, Error>;
     use crate::aarch64::gic::gicv3::kvm::KvmGICv3;
@@ -110,7 +110,7 @@ pub mod kvm {
         }
 
         fn init_device_attributes(
-            vm: &Arc<dyn hypervisor::Vm>,
+            vm: &Arc<Mutex<dyn hypervisor::Vm>>,
             gic_device: &dyn GICDevice,
         ) -> Result<()> {
             KvmGICv3::init_device_attributes(vm, gic_device)?;
@@ -122,6 +122,8 @@ pub mod kvm {
             };
 
             let its_fd = vm
+                .lock()
+                .unwrap()
                 .create_device(&mut its_device)
                 .map_err(Error::CreateGIC)?;
 

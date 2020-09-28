@@ -12,7 +12,7 @@ pub mod kvm {
     use hypervisor::kvm::kvm_bindings;
     use std::any::Any;
     use std::convert::TryInto;
-    use std::sync::Arc;
+    use std::sync::{Arc, Mutex};
     use std::{boxed::Box, result};
     use vm_migration::{
         Migratable, MigratableError, Pausable, Snapshot, SnapshotDataSection, Snapshottable,
@@ -193,7 +193,7 @@ pub mod kvm {
         }
 
         fn init_device_attributes(
-            _vm: &Arc<dyn hypervisor::Vm>,
+            _vm: &Arc<Mutex<dyn hypervisor::Vm>>,
             gic_device: &dyn GICDevice,
         ) -> crate::aarch64::gic::Result<()> {
             /* Setting up the distributor attribute.
