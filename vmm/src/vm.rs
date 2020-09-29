@@ -77,7 +77,8 @@ use vmm_sys_util::terminal::Terminal;
 use arch::aarch64::gic::gicv3::kvm::{KvmGICv3, GIC_V3_SNAPSHOT_ID};
 #[cfg(target_arch = "aarch64")]
 use arch::aarch64::gic::kvm::create_gic;
-
+#[cfg(target_arch = "x86_64")]
+const DEBUG_IOPORT: u16 = 0x80;
 // 64 bit direct boot entry offset for bzImage
 #[cfg(target_arch = "x86_64")]
 const KERNEL_64BIT_ENTRY_OFFSET: u64 = 0x200;
@@ -1587,6 +1588,17 @@ impl VmmOps for Vm {
     }
     #[cfg(target_arch = "x86_64")]
     fn pio_write(&self, addr: u64, data: &[u8]) -> hypervisor::vm::Result<()> {
+        #[cfg(target_arch = "x86_64")]
+        {
+            if addr as u16 == DEBUG_IOPORT && data.len() == 1 {
+                debug!(
+                    "[{} code 0x{:x}] {} clocks",
+                    cpu::DebugIoPortRange::from_u8(data[0]),
+                    data[0],
+                    self.saved_clock.unwrap().clock,
+                );
+            }
+        }
         self.device_manager
             .lock()
             .unwrap()

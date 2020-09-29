@@ -78,7 +78,7 @@ pub enum DebugIoPortRange {
 }
 #[cfg(target_arch = "x86_64")]
 impl DebugIoPortRange {
-    fn from_u8(value: u8) -> DebugIoPortRange {
+    pub fn from_u8(value: u8) -> DebugIoPortRange {
         match value {
             0x00..=0x1f => DebugIoPortRange::Firmware,
             0x20..=0x3f => DebugIoPortRange::Bootloader,
@@ -375,10 +375,11 @@ impl Vcpu {
                     Ok(true)
                 }
                 #[cfg(target_arch = "x86_64")]
-                VmExit::LogDebugPort(data) => {
-                    self.log_debug_ioport(data);
-                    Ok(true)
-                }
+                VmExit::IoIn(_addr, _data) => Ok(true),
+                #[cfg(target_arch = "x86_64")]
+                VmExit::IoOut(_addr, _data) => Ok(true),
+                VmExit::MmioRead(_addr, _data) => Ok(true),
+                VmExit::MmioWrite(_addr, _data) => Ok(true),
                 VmExit::Ignore => Ok(true),
                 VmExit::Reset => Ok(false),
                 // No need to handle anything from a KVM HyperV exit
