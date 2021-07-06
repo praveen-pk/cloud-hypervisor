@@ -107,6 +107,10 @@ pub const KVM_TSS_SIZE: u64 = (3 * 4) << 10;
 pub const KVM_IDENTITY_MAP_START: GuestAddress = GuestAddress(KVM_TSS_START.0 + KVM_TSS_SIZE);
 pub const KVM_IDENTITY_MAP_SIZE: u64 = 4 << 10;
 
+/// VTPM space: GET CORRECT SPACE AREA
+pub const VTPM_START: GuestAddress = GuestAddress(0xFED40000);
+pub const VTPM_SIZE: u64 = 0x5000;
+
 // IOAPIC
 pub const IOAPIC_START: GuestAddress = GuestAddress(0xfec0_0000);
 pub const IOAPIC_SIZE: u64 = 0x20;

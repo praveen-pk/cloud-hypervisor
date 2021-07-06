@@ -1212,6 +1212,14 @@ impl DeviceManager {
         &self.id_to_dev_info
     }
 
+    // fn add_vtpm_device(
+    //     &mut self,
+    // ) -> DeviceManagerResult<()> {
+
+    //     // Memory Mapped IO + Handlers
+    //     Ok(())
+    // }
+
     #[allow(unused_variables)]
     fn add_pci_devices(
         &mut self,
@@ -1669,10 +1677,7 @@ impl DeviceManager {
         self.bus_devices
             .push(Arc::clone(&serial) as Arc<Mutex<dyn BusDevice>>);
 
-        self.address_manager
-            .allocator
-            .lock()
-            .unwrap()
+        self.address_manager.allocator.lock().unwrap()
             .allocate_io_addresses(Some(GuestAddress(0x3f8)), 0x8, None)
             .ok_or(DeviceManagerError::AllocateIoPort)?;
 
@@ -4353,6 +4358,21 @@ impl Aml for DeviceManager {
             ],
         )
         .append_aml_bytes(bytes);
+
+
+        // // Add vtpm device:
+        let vtpm_acpi = VTPMDevice {};
+        let vtpm_dsdt_data = vtpm_acpi.to_aml_bytes();
+        bytes.extend_from_slice(vtpm_dsdt_data.as_slice());
+
+        //MANUAL
+        // let mut vtpm_acpi = Vec::<u8>::new();
+
+        // vtpm_acpi.extend(b"TPM2");
+        // vtpm_acpi.extend();
+        // bytes.extend_from_slice(vtpm_acpi.as_slice());
+
+
 
         self.ged_notification_device
             .as_ref()

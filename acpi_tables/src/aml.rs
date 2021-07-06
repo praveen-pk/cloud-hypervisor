@@ -636,6 +636,25 @@ impl<'a> Aml for Method<'a> {
     }
 }
 
+pub struct DerefOf<'a> {
+    arg: &'a dyn Aml,
+}
+
+impl<'a> DerefOf<'a> {
+    pub fn new(arg: &'a dyn Aml) -> Self {
+        DerefOf { arg }
+    }
+}
+
+/* ACPI 1.0b: 16.2.5.4 Type 2 Opcodes Encoding: DefDerefOf */
+impl<'a> Aml for DerefOf<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![0x83]; /* DerefOfOp */
+        bytes.append(&mut self.arg.to_aml_bytes());
+        bytes
+    }
+}
+
 pub struct Return<'a> {
     value: &'a dyn Aml,
 }
@@ -743,15 +762,15 @@ pub enum OpRegionSpace {
     GenericSerialBus,
 }
 
-pub struct OpRegion {
+pub struct OpRegion<'a> {
     path: Path,
     space: OpRegionSpace,
-    offset: usize,
+    offset: &'a dyn Aml,
     length: usize,
 }
 
-impl OpRegion {
-    pub fn new(path: Path, space: OpRegionSpace, offset: usize, length: usize) -> Self {
+impl<'a> OpRegion<'a> {
+    pub fn new(path: Path, space: OpRegionSpace, offset: &'a dyn Aml, length: usize) -> Self {
         OpRegion {
             path,
             space,
@@ -837,6 +856,26 @@ impl<'a> Aml for LessThan<'a> {
         bytes.push(0x95); /* LLessOp */
         self.left.append_aml_bytes(bytes);
         self.right.append_aml_bytes(bytes);
+    }
+}
+
+pub struct GreaterThanEqual<'a> {
+    left: &'a dyn Aml,
+    right: &'a dyn Aml,
+}
+
+impl<'a> GreaterThanEqual<'a> {
+    pub fn new(left: &'a dyn Aml, right: &'a dyn Aml) -> Self {
+        GreaterThanEqual { left, right }
+    }
+}
+
+impl<'a> Aml for GreaterThanEqual<'a> {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        let mut bytes = vec![0x92, 0x95]; /* LLessOp */
+        bytes.extend_from_slice(&self.left.to_aml_bytes());
+        bytes.extend_from_slice(&self.right.to_aml_bytes());
+        bytes
     }
 }
 
@@ -1578,7 +1617,7 @@ mod tests {
         ];
 
         assert_eq!(
-            OpRegion::new("PRST".into(), OpRegionSpace::SystemIo, 0xcd8, 0xc).to_aml_bytes(),
+            OpRegion::new("PRST".into(), OpRegionSpace::SystemIo, &(0xcd8 as usize), 0xc).to_aml_bytes(),
             &op_region_data[..]
         );
     }
