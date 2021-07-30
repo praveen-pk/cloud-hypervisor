@@ -1062,6 +1062,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "tpm2"
+version = "0.1.0"
+dependencies = [
+ "tpm2-sys",
+]
+
+[[package]]
+name = "tpm2-sys"
+version = "0.1.0"
+dependencies = [
+ "num_cpus",
+ "pkg-config",
+]
+
+[[package]]
 name = "unicode-xid"
 version = "0.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1391,6 +1406,7 @@ dependencies = [
  "vm-migration",
  "vm-virtio",
  "vmm-sys-util",
+ "vtpm",
 ]
 
 [[package]]
@@ -1410,6 +1426,8 @@ name = "vtpm"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "tpm2",
+ "virtio-devices",
 ]
 
 [[package]]

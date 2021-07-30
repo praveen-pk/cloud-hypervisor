@@ -89,5 +89,5 @@ members = [
     "vm-device",
     "vm-migration",
     "vm-virtio",
-    "vtpm"
+    "vtpm",
 ]
