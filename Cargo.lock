@@ -513,6 +513,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dffe52ecf27772e601905b7522cb4ef790d2cc203488bbd0e2fe85fcb74566d"
 
 [[package]]
+name = "memoffset"
+version = "0.6.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "59accc507f1338036a0477ef61afdae33cde60840f4dfe481319ce3ad116ddf9"
+dependencies = [
+ "autocfg",
+]
+
+[[package]]
 name = "micro_http"
 version = "0.1.0"
 source = "git+https://github.com/firecracker-microvm/micro-http?branch=main#a730d86940081ad044cdfbc1285c1db6d3048392"
@@ -1426,6 +1435,8 @@ name = "vtpm"
 version = "0.1.0"
 dependencies = [
  "byteorder",
+ "filedescriptor",
+ "nix",
  "tpm2",
  "virtio-devices",
 ]
