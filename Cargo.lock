@@ -1436,6 +1436,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "filedescriptor",
+ "libc",
  "nix",
  "tpm2",
  "virtio-devices",
