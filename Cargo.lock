@@ -215,6 +215,7 @@ dependencies = [
  "vm-memory",
  "vm-migration",
  "vmm-sys-util",
+ "vtpm",
 ]
 
 [[package]]
