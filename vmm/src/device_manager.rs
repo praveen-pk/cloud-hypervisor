@@ -1032,6 +1032,7 @@ impl DeviceManager {
 
         let device_manager = DeviceManager {
             address_manager: Arc::clone(&address_manager),
+            // vtpm: None,
             console: Arc::new(Console::default()),
             interrupt_controller: None,
             #[cfg(target_arch = "aarch64")]
@@ -1139,6 +1140,8 @@ impl DeviceManager {
             }
         }
 
+
+
         #[cfg(target_arch = "x86_64")]
         self.add_legacy_devices(
             self.reset_evt
@@ -1168,6 +1171,17 @@ impl DeviceManager {
             console_pty,
             console_resize_pipe,
         )?;
+
+        //Add VTPM
+        println!("REACHED THIS POINT");
+        let vtpm = self.add_vtpm_device(
+            &legacy_interrupt_manager
+        )?;
+        self.bus_devices.push(Arc::clone(&vtpm) as Arc<Mutex<dyn BusDevice>>);
+        println!("REACHED THIS POINT 2");
+
+        // Reserve some IRQs for PCI devices in case they need to support INTx.
+        self.reserve_legacy_interrupts_for_pci_devices()?;
 
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
@@ -1692,10 +1706,11 @@ impl DeviceManager {
 
     fn add_vtpm_device(
         &mut self,
-    ) -> DeviceManagerResult<()> {
+        // serial_writer: Option<Box<dyn io::Write + Send>>,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<Arc<Mutex<devices::tpm_tis::TPMIsa>>> {
 
-        // Memory Mapped IO + Handlers
-        let serial_irq = self
+        let irq_num = self
             .address_manager
             .allocator
             .lock()
@@ -1703,10 +1718,16 @@ impl DeviceManager {
             .allocate_irq()
             .unwrap();
 
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq_num as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;
+
         // Must Create VTPM Device...
-        let vtpm = Arc::new(Mutex::new(devices::legacy::TpmIsa::new(
+        let vtpm = Arc::new(Mutex::new(devices::tpm_tis::TPMIsa::new(
             interrupt_group,
-            serial_writer,
+            irq_num,
         )));
 
         // Add VTPM Device to mmio
@@ -1715,7 +1736,7 @@ impl DeviceManager {
             .insert(vtpm.clone(), arch::layout::VTPM_START.0, arch::layout::VTPM_SIZE)
             .map_err(DeviceManagerError::BusError)?;
 
-        Ok(())
+        Ok(vtpm)
     }
 
     #[cfg(target_arch = "aarch64")]
