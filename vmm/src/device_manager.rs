@@ -1172,13 +1172,10 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
-        //Add VTPM
-        println!("REACHED THIS POINT");
         let vtpm = self.add_vtpm_device(
             &legacy_interrupt_manager
         )?;
         self.bus_devices.push(Arc::clone(&vtpm) as Arc<Mutex<dyn BusDevice>>);
-        println!("REACHED THIS POINT 2");
 
         // Reserve some IRQs for PCI devices in case they need to support INTx.
         self.reserve_legacy_interrupts_for_pci_devices()?;
