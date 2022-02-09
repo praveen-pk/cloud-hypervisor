@@ -240,6 +240,7 @@ impl TPMIsa {
     }
 
     fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
+        warn!("Trigger Interrupt at {:?}", self.irq_num);
         self.irq.trigger(self.irq_num)
     }
 
@@ -258,13 +259,13 @@ impl TPMIsa {
                 return 1;
             }
         }
-        
+
         0
     }
 
     /* raise an interrupt if allowed */
     fn tpm_tis_raise_irq(&mut self, locty: u8, irqmask: u32) {
-        warn!("Raise IRQ");
+        warn!("Raise IRQ, locty {:?}", locty);
         if !(locty < 5) {
             return;
         }
@@ -466,6 +467,7 @@ impl TPMIsa {
             selftest_done: false,
         });
 
+        warn!("Input: {:?} , Output: {:?}", self.cmd.as_ref().unwrap().input, self.cmd.as_ref().unwrap().output);
 
         self.tpm_backend_deliver_request();
     }
@@ -480,11 +482,13 @@ impl TPMIsa {
         warn!("Shift to use: {}", shift);
         warn!("Locty to use: {}", locty);
         warn!("Active Locty: {}", self.active_locty);
+        warn!("New TPM Write2(base: {}, offset: {}, data: {:?})", _base, offset, data); //DEBUG
+        warn!("mmio.write start Locty {:?}, Current STS: {:#X}", locty, self.locs[locty as usize].sts);
 
-        // if self.tpm_backend_had_startup_error() {
+        // if self.tpm_backend_had_startup_error(self) {
         //     return Err(Error::TPMBackendFailure);
         // }
-    
+
 
         val &= mask;
         warn!("Masked value: {}", val);
@@ -792,7 +796,7 @@ impl TPMIsa {
                 return Err(Error::BadWriteOffset(offset));
             }
         }
-        
+        warn!("mmio.write end: Locty: {}, End STS: {:#X}, offset= {:#X}, data: {:?}", locty, self.locs[locty as usize].sts, offset, data);
         Ok(())
     }
 }
@@ -810,8 +814,8 @@ impl BusDevice for TPMIsa {
         let mut val: u32 = 0xffffffff;
         // self.count +=1;
 
-        warn!("New TPM Read(base: {}, offset: {}, data: {:?})", base, offset, data); //DEBUG
-        warn!("Locty: {}", locty);
+        warn!("New TPM Read(offset: {:#X}, data: {:?})", offset, data); //DEBUG
+        warn!("Locty: {}, Current STS: {:#X}", locty, self.locs[locty as usize].sts);
 
 
         // Check tpm_backend_active:
@@ -842,14 +846,16 @@ impl BusDevice for TPMIsa {
                 val = self.irq_num
             },
             TPM_TIS_REG_INT_STATUS => val = self.locs[locty as usize].ints,
-            TPM_TIS_REG_INTF_CAPABILITY => val = TPM_TIS_CAPABILITIES_SUPPORTED2_0, //ONLY IMPLEMENTED TPM2 
+            TPM_TIS_REG_INTF_CAPABILITY => val = TPM_TIS_CAPABILITIES_SUPPORTED2_0, //ONLY IMPLEMENTED TPM2
             TPM_TIS_REG_STS => {
-                warn!("Command: Reg status: {}", val);
+                warn!("Command: Reg status.");
+                let buff_size:usize = self.be_buffer_size.try_into().unwrap();
                 if self.active_locty == locty {
-                    warn!("Active Locty matched: {}", self.locs[locty as usize].sts);
+                    warn!("Active Locty matched. Current STS: {:#X} size = {:?}", self.locs[locty as usize].sts, size);
+                    warn!("TIS_REG_STS: be_buffer_size = {:?}, rw_offset= {:?}", buff_size, self.rw_offset);
                     if self.locs[locty as usize].sts & TPM_TIS_STS_DATA_AVAILABLE != 0 {
                         val = ((cmp::min(self.tpm_cmd_get_size(), self.be_buffer_size.try_into().unwrap()) - self.rw_offset as u32) << 8) | self.locs[locty as usize].sts;
-                        warn!("Data available: {}", val);
+                        warn!("TIS_REG_STS: Data available: {}", val);
                     } else {
                         avail = self.be_buffer_size as u32 - self.rw_offset as u32; // IMPLEMENT be_buffer_size
                         /*
@@ -861,7 +867,7 @@ impl BusDevice for TPMIsa {
                         }
                         val = (avail << 8) | self.locs[locty as usize].sts;
                         self.count+=1;
-                        warn!("Data unavailable: bytes available: {}, buffer_size: {}, rw_offset: {}, new val: {}", avail, self.be_buffer_size, self.rw_offset, val);
+                        warn!("TIS_REG_STS: Data unavailable: bytes available: {:#x}, buffer_size: {:#x}, rw_offset: {:#x}, new val: {:#x}, sts={:#x}", avail, self.be_buffer_size, self.rw_offset, val,self.locs[locty as usize].sts);
                     }
                 }
             },
@@ -927,12 +933,12 @@ impl BusDevice for TPMIsa {
         // if self.count >30 {
         //     panic!("30 unavailables reached");
         // }
-
         if read_ok && data.len() <= 4 {
             for (byte, read) in data.iter_mut().zip(<u32>::to_le_bytes(val).iter().cloned()) {
                 *byte = read as u8;
             }
-            warn!("Data result after read : {:?}", data);
+            warn!("mmio.read end: offset: {:#X}, data: {:?}, status = {:#X}", offset, data, self.locs[locty as usize].sts);
+
         } else {
             warn!(
                 "Invalid TPM read: offset {}, data length {}",
