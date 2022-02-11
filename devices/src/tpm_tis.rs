@@ -16,6 +16,8 @@ use vm_device::interrupt::{
 use std::cmp;
 use std::convert::TryInto;
 use vtpm::tpm_backend::{TPMVersion, TPMType, TPMBackendCmd, TPMEmulator, TPMBackend,};
+use std::{thread, time};
+
 
 /* Costants */
 const TPM_TIS_NUM_LOCALITIES: u8 = 5;
@@ -73,7 +75,6 @@ const TPM_TIS_REG_RID: u64 = 0xf04;
 fn tpm_tis_locality_from_addr(addr: u64) -> u8 {
     ((addr >> TPM_TIS_LOCALITY_SHIFT) & 0x7) as u8
 }
-
 
 #[derive(Debug)]
 pub enum Error {
@@ -164,11 +165,12 @@ pub struct TPMIsa {
     cmd: Option<TPMBackendCmd>,
     locs: Vec<TPMLocality>,
     be_buffer_size: usize,
-    be_driver: TPMBackend, 
+    be_driver: TPMBackend,
     be_tpm_version: TPMVersion,
     count: usize,
     irq_num: InterruptIndex,
     irq: Arc<Box<dyn InterruptSourceGroup>>,
+    startup_invoked: bool,
     // out: Option<Box<dyn io::Write + Send>>,
 }
 
@@ -212,14 +214,15 @@ impl TPMIsa {
             be_driver,
             count: 0,
             /* TPM 2 only supported for now. This value should be modified for other versions of TPM */
-            be_tpm_version: TPMVersion::TpmVersionTwo,  
+            be_tpm_version: TPMVersion::TpmVersionTwo,
             locs,
             irq_num,
             irq,
+            startup_invoked: false,
         }
     }
 
-    fn state(&self) -> TPMState {
+    fn get_state(&self) -> TPMState {
         TPMState {
             buffer: self.buffer.clone().into(),
             rw_offset: self.rw_offset,
@@ -238,7 +241,76 @@ impl TPMIsa {
         self.next_locty = state.next_locty;
         self.locs = state.locs.clone().into();
     }
+    fn set_startup_invoked(&mut self) {
+        self.startup_invoked = true;
+    }
+    fn startup_invoked(mut self) -> bool {
+        self.startup_invoked
+    }
 
+    fn invoke_startup(&self, base:u64, offset: u64) -> isize {
+/*         let locty: u8 = 0; // Hardcode to zero temporarily
+        let locty: u8 = tpm_tis_locality_from_addr(base + offset);
+        // TPM Startup should run only once.
+        // This is temporary work around until Startup is run from firmware
+        if self.startup_invoked() {
+            return 0;
+        }
+        let startup_command:[u8; 12] = [
+            0x80, 0x01, // TPM_ST_NO_SESSIONS
+            0x00, 0x00, 0x00, 0x0c, // commandSize = 12
+            0x00, 0x00, 0x01, 0x44, // TPM_CC_Startup
+            0x00, 0x00, // TPM_SU_CLEAR
+        ];
+        let mut data:[u8; 4] = [0,0,0,0];
+        //self.locs[locty as usize].sts;
+
+
+        if self.locs[locty as usize].sts & TPM_TIS_INT_COMMAND_READY == 0 {
+            warn!("PPK: TPM at locty {:?} not ready for Startup", locty);
+            return 1;
+        }
+        warn!("PPK: TPM is Ready");
+        self.read(base, TPM_TIS_REG_STS, &mut data);
+        warn!("PPK: sts return {:?}", data);
+        let mut burstcnt = (u32::from_le_bytes(data) >> 8) & 0xFFFF;
+
+        while true {
+            if burstcnt >= 0 {
+                break;
+            }
+            else{
+                //sleep for 10 ms
+                thread::sleep(time::Duration::from_millis(10));
+                self.read(base, TPM_TIS_REG_STS, &mut data);
+                burstcnt = (u32::from_le_bytes(data) >> 8) & 0xFFFF;
+            }
+        }
+
+         warn!("PPK: burstcnt = {:?}", burstcnt);
+        self.write(base, fifo_offset, &startup_command);
+        let sts = self.read(base, TPM_TIS_REG_STS, data);
+        while(1){
+            if sts & TPM_TIS_INT_COMMAND_READY == 1{
+                break;
+            }
+            else{
+                //sleep for 10 ms
+                thread::sleep(time::Duration::from_millis(10));
+                sts = self.read(base, TPM_TIS_REG_STS, data);
+            }
+        }
+        warn!("PPK: TPM is Ready: 2");
+
+        let sts = self.read(base, TPM_TIS_REG_STS, data);
+        warn!("PPK: STS Register {:#x}",sts);
+        let tpm_go_command:[u8] = [0x20];
+        self.write(base, TPM_TIS_REG_STS, &tpm_go_command);
+*/
+
+
+        0
+    }
     fn trigger_interrupt(&mut self) -> result::Result<(), io::Error> {
         warn!("Trigger Interrupt at {:?}", self.irq_num);
         self.irq.trigger(self.irq_num)
@@ -373,22 +445,22 @@ impl TPMIsa {
             if self.be_driver.deliver_request(cmd) == 0 {
                 let locty = cmd.locty;
                 assert!(locty < 5);
-    
+
                 if cmd.selftest_done {
                     for l in 0..TPM_TIS_NUM_LOCALITIES-1 {
                         self.locs[l as usize].sts |= 1<<2;
                     }
                 }
-    
+
                 self.tpm_tis_sts_set(locty, TPM_TIS_STS_VALID | TPM_TIS_STS_DATA_AVAILABLE);
                 self.locs[locty as usize].state = TPMTISState::TpmTisStateCompletion;
-    
+
                 // tpm_util_show_buffer(s->buffer, s->be_buffer_size, "From TPM");
-    
+
                 if self.next_locty < 5 {
                     self.tpm_tis_abort();
                 }
-    
+
                 // self.tpm_tis_raise_irq(locty, TPM_TIS_INT_DATA_AVAILABLE | TPM_TIS_INT_STS_VALID);
             }
         }
@@ -572,7 +644,7 @@ impl TPMIsa {
                         for l in 0..locty {
                             self.locs[l as usize].access &= !TPM_TIS_ACCESS_SEIZE;
                         }
-                        
+
                         self.locs[locty as usize].access |= TPM_TIS_ACCESS_SEIZE;
 
                         set_new_locty = 0;
@@ -609,7 +681,7 @@ impl TPMIsa {
 
                 warn!("Command: IntEnable Access: {}", val);
             },
-            TPM_TIS_REG_INT_VECTOR => {}, 
+            TPM_TIS_REG_INT_VECTOR => {},
             TPM_TIS_REG_INT_STATUS => {
                 if self.active_locty == locty {
                     /* clearing of interrupt flags */
@@ -633,14 +705,14 @@ impl TPMIsa {
                             * request the backend to cancel. Some backends may not
                             * support it
                             */
-                            self.tpm_backend_cancel_cmd(); 
+                            self.tpm_backend_cancel_cmd();
                         }
                     }
 
                     //ONLY TPM2 Command
                     if val & TPM_TIS_STS_RESET_ESTABLISHMENT_BIT != 0 {
                         if locty == 3 || locty == 4 {
-                            self.tpm_backend_reset_tpm_established_flag(locty); 
+                            self.tpm_backend_reset_tpm_established_flag(locty);
                         }
                     }
 
@@ -736,7 +808,7 @@ impl TPMIsa {
                         }
                     }
                 }
-            }  
+            }
         },
             TPM_TIS_REG_DATA_XFIFO ..= TPM_TIS_REG_DATA_XFIFO_END => {
                 /* data fifo */
@@ -748,7 +820,7 @@ impl TPMIsa {
                             self.locs[locty as usize].state = TPMTISState::TpmTisStateReception;
                             self.tpm_tis_sts_set(locty, TPM_TIS_STS_EXPECT | TPM_TIS_STS_VALID);
                         }
-    
+
                         val >>= shift as u32;
                         if size > 4 - (addr & 0x3) as usize {
                             /* prevent access beyond FIFO */
@@ -770,7 +842,7 @@ impl TPMIsa {
                             warn!("Check for complete pack");
                             /* we have a packet length - see if we have all of it */
                             let need_irq: bool = !(self.locs[locty as usize].sts & TPM_TIS_STS_VALID) != 0;
-    
+
                             let len = self.tpm_cmd_get_size(); //IMPLEMENT
                             if len > self.rw_offset as u32 {
                                 self.tpm_tis_sts_set(locty, TPM_TIS_STS_EXPECT | TPM_TIS_STS_VALID);
@@ -783,7 +855,7 @@ impl TPMIsa {
                             }
                         }
                     }
-                }  
+                }
             },
             TPM_TIS_REG_INTERFACE_ID => {
                 if val & TPM_TIS_IFACE_ID_INT_SEL_LOCK != 0 {
@@ -829,7 +901,7 @@ impl BusDevice for TPMIsa {
                 warn!("Offset: Register Access");
                 val = (self.locs[locty as usize].access & !TPM_TIS_ACCESS_SEIZE) as u32;
                 /* Get Pending Flag */
-                if self.tpm_tis_check_request_use_except(locty) != 0 { 
+                if self.tpm_tis_check_request_use_except(locty) != 0 {
                     val |= TPM_TIS_ACCESS_PENDING_REQUEST;
                     warn!("TPM Tis access pending request locty: {}", locty);
                 }
@@ -949,6 +1021,9 @@ impl BusDevice for TPMIsa {
     }
 
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
+
+        self.invoke_startup(base, offset);
+
         let size = data.len();
         warn!(""); // Separator
         warn!("New TPM Write(base: {}, offset: {}, data: {:?})", base, offset, data); //DEBUG
@@ -965,7 +1040,7 @@ impl BusDevice for TPMIsa {
 
             let mask: u32 = if size == 1 { 0xff } else { if size == 2 { 0xffff } else { !0 } };
             warn!("Mask value: {}", mask);
-            
+
             if let Err(e) = self.handle_write(base, offset, v, mask, data) {
                 warn!("Failed to write to vTPM device: {}", e);
             }
