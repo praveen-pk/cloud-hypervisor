@@ -887,6 +887,9 @@ pub struct DeviceManager {
     // information for filling the ACPI VIOT table.
     iommu_attached_devices: Option<(PciBdf, Vec<PciBdf>)>,
 
+    // List of allocated IRQs for each PCI slot.
+    pci_irq_slots: [u8; 32],
+
     // Tree of devices, representing the dependencies between devices.
     // Useful for introspection, snapshot and restore.
     device_tree: Arc<Mutex<DeviceTree>>,
@@ -1050,6 +1053,7 @@ impl DeviceManager {
             iommu_device: None,
             iommu_mapping: None,
             iommu_attached_devices: None,
+            pci_irq_slots: [0; 32],
             pci_segments,
             device_tree,
             exit_evt: exit_evt.try_clone().map_err(DeviceManagerError::EventFd)?,
@@ -1187,6 +1191,28 @@ impl DeviceManager {
         self.add_pci_devices(virtio_devices.clone())?;
 
         self.virtio_devices = virtio_devices;
+
+        Ok(())
+    }
+    fn reserve_legacy_interrupts_for_pci_devices(&mut self) -> DeviceManagerResult<()> {
+        // Reserve 8 IRQs which will be shared across all PCI devices.
+        let num_irqs = 8;
+        let mut irqs: Vec<u8> = Vec::new();
+        for _ in 0..num_irqs {
+            irqs.push(
+                self.address_manager
+                    .allocator
+                    .lock()
+                    .unwrap()
+                    .allocate_irq()
+                    .ok_or(DeviceManagerError::AllocateIrq)? as u8,
+            );
+        }
+
+        // There are 32 devices on the PCI bus, let's assign them an IRQ.
+        for i in 0..32 {
+            self.pci_irq_slots[i] = irqs[(i % num_irqs) as usize];
+        }
 
         Ok(())
     }
@@ -4237,6 +4263,31 @@ fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str
     None
 }
 
+#[cfg(feature = "acpi")]
+struct VTPMDevice {}
+
+#[cfg(feature = "acpi")]
+impl Aml for VTPMDevice {
+    fn to_aml_bytes(&self) -> Vec<u8> {
+        aml::Device::new(
+            "TPM2".into(),
+            vec![
+                &aml::Name::new("_HID".into(), &"MSFT0101"),
+                &aml::Name::new("_STA".into(), &(0xF as usize)),
+                &aml::Name::new(
+                    "_CRS".into(),
+                    &aml::ResourceTemplate::new(vec![&aml::Memory32Fixed::new(
+                        true,
+                        layout::VTPM_START.0 as u32,
+                        layout::VTPM_SIZE as u32,
+                    )]),
+                 ),
+            ]
+        ).to_aml_bytes()
+    }
+}
+
+#[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         #[cfg(target_arch = "aarch64")]
