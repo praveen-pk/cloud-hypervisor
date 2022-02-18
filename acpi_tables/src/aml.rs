@@ -762,15 +762,16 @@ pub enum OpRegionSpace {
     GenericSerialBus,
 }
 
-pub struct OpRegion<'a> {
+pub struct OpRegion {
     path: Path,
     space: OpRegionSpace,
-    offset: &'a dyn Aml,
+    //offset: &'a dyn Aml,  # revert this to clh 21.0
+    offset: usize,
     length: usize,
 }
 
-impl<'a> OpRegion<'a> {
-    pub fn new(path: Path, space: OpRegionSpace, offset: &'a dyn Aml, length: usize) -> Self {
+impl OpRegion {
+    pub fn new(path: Path, space: OpRegionSpace, offset: usize, length: usize) -> Self {
         OpRegion {
             path,
             space,

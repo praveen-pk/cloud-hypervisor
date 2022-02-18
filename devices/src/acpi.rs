@@ -122,7 +122,7 @@ impl Aml for AcpiGedDevice {
                 &aml::OpRegion::new(
                     "GDST".into(),
                     aml::OpRegionSpace::SystemMemory,
-                    &(self.address.0 as usize),
+                    self.address.0 as usize, // revert to clh 21.0
                     GED_DEVICE_ACPI_SIZE,
                 ),
                 &aml::Field::new(

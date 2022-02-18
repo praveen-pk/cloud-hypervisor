@@ -169,7 +169,7 @@ pub struct TPMIsa {
     be_tpm_version: TPMVersion,
     count: usize,
     irq_num: InterruptIndex,
-    irq: Arc<Box<dyn InterruptSourceGroup>>,
+    irq: Arc<dyn InterruptSourceGroup>,
     startup_invoked: bool,
     // out: Option<Box<dyn io::Write + Send>>,
 }
@@ -178,7 +178,7 @@ impl VersionMapped for TPMState {}
 
 impl TPMIsa {
     pub fn new(
-        irq: Arc<Box<dyn InterruptSourceGroup>>,
+        irq: Arc<dyn InterruptSourceGroup>,
         irq_num: InterruptIndex,
         // out: Option<Box<dyn io::Write + Send>>,
     ) -> Self {
