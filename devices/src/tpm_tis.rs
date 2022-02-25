@@ -554,11 +554,10 @@ impl TPMIsa {
         let addr = _base + offset;
         let mut set_new_locty = 1;
 
-        warn!("Shift to use: {}", shift);
-        warn!("Locty to use: {}", locty);
-        warn!("Active Locty: {}", self.active_locty);
-        warn!("New TPM Write2(base: {}, offset: {}, data: {:?})", _base, offset, data); //DEBUG
-        warn!("mmio.write start Locty {:?}, Current STS: {:#X}", locty, self.locs[locty as usize].sts);
+        //warn!("Shift to use: {}", shift);
+        //warn!("Locty to use: {}", locty);
+        //warn!("Active Locty: {}", self.active_locty);
+        warn!("mmio.write start base: {:#X}, offset: {:#X}, data: {:?}, Current STS: {:#X}", _base, offset, data, self.locs[locty as usize].sts); //DEBUG
 
         // if self.tpm_backend_had_startup_error(self) {
         //     return Err(Error::TPMBackendFailure);
@@ -566,13 +565,13 @@ impl TPMIsa {
 
 
         val &= mask;
-        warn!("Masked value: {}", val);
+        //warn!("Masked value: {}", val);
 
         if shift != 0 {
             val <<= shift;
             mask <<= shift;
         }
-        warn!("Shifted Value: {}", val);
+        //warn!("Shifted Value: {}", val);
 
         mask ^= 0xffffffff;
 
@@ -871,7 +870,7 @@ impl TPMIsa {
                 return Err(Error::BadWriteOffset(offset));
             }
         }
-        warn!("mmio.write end: Locty: {}, End STS: {:#X}, offset= {:#X}, data: {:?}", locty, self.locs[locty as usize].sts, offset, data);
+        warn!("mmio.write end: End STS: {:#X}", self.locs[locty as usize].sts);
         Ok(())
     }
 }
@@ -889,8 +888,8 @@ impl BusDevice for TPMIsa {
         let mut val: u32 = 0xffffffff;
         // self.count +=1;
 
-        warn!("New TPM Read(offset: {:#X}, data: {:?})", offset, data); //DEBUG
-        warn!("Locty: {}, Current STS: {:#X}", locty, self.locs[locty as usize].sts);
+        //warn!("mmio.read, locty = {:?} offset: {:#X}, data: {:#X} ", locty, offset, data); //DEBUG
+        //warn!("Locty: {}, Current STS: {:#X}", locty, self.locs[locty as usize].sts);
 
 
         // Check tpm_backend_active:
@@ -926,11 +925,14 @@ impl BusDevice for TPMIsa {
                 warn!("Command: Reg status.");
                 let buff_size:usize = self.be_buffer_size.try_into().unwrap();
                 if self.active_locty == locty {
+                    let my_rw_offset = self.rw_offset;
                     warn!("Active Locty matched. Current STS: {:#X} size = {:?}", self.locs[locty as usize].sts, size);
-                    warn!("TIS_REG_STS: be_buffer_size = {:?}, rw_offset= {:?}", buff_size, self.rw_offset);
-                    if self.locs[locty as usize].sts & TPM_TIS_STS_DATA_AVAILABLE != 0 {
-                        val = ((cmp::min(self.tpm_cmd_get_size(), self.be_buffer_size.try_into().unwrap()) - self.rw_offset as u32) << 8) | self.locs[locty as usize].sts;
-                        warn!("TIS_REG_STS: Data available: {}", val);
+                    warn!("TIS_REG_STS: be_buffer_size = {:?}, rw_offset= {:?} tpm_cmd_get_size = {:?}", buff_size, my_rw_offset, self.tpm_cmd_get_size());
+                    if (self.locs[locty as usize].sts & TPM_TIS_STS_DATA_AVAILABLE) != 0 {
+                        val = cmp::min(self.tpm_cmd_get_size(), self.be_buffer_size.try_into().unwrap());
+                        val = val - self.rw_offset as u32;
+                        val = (val << 8) | self.locs[locty as usize].sts;
+                        warn!("TIS_REG_STS: Data available: {:#X}", val);
                     } else {
                         avail = self.be_buffer_size as u32 - self.rw_offset as u32; // IMPLEMENT be_buffer_size
                         /*
@@ -1029,7 +1031,7 @@ impl BusDevice for TPMIsa {
 
         let size = data.len();
         warn!(""); // Separator
-        warn!("New TPM Write(base: {}, offset: {}, data: {:?})", base, offset, data); //DEBUG
+
         if size <= 4 {
             let v = {
                 let mut array = [0u8;4];
@@ -1038,11 +1040,10 @@ impl BusDevice for TPMIsa {
                 }
                 u32::from_le_bytes(array)
             };
-
-            warn!("Value of input: {}", v);
+            warn!("New TPM Write(base: {:#X}, offset: {:#X}, data: {:?}", base, offset, v); //DEBUG
 
             let mask: u32 = if size == 1 { 0xff } else { if size == 2 { 0xffff } else { !0 } };
-            warn!("Mask value: {}", mask);
+            //warn!("Mask value: {}", mask);
 
             if let Err(e) = self.handle_write(base, offset, v, mask, data) {
                 warn!("Failed to write to vTPM device: {}", e);
