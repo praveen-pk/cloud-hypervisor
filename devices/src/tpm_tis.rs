@@ -796,7 +796,7 @@ impl TPMIsa {
                     if self.rw_offset > 5 && (self.locs[locty as usize].sts & TPM_TIS_STS_EXPECT != 0) {
                         warn!("Check for complete pack");
                         /* we have a packet length - see if we have all of it */
-                        let need_irq: bool = !(self.locs[locty as usize].sts & TPM_TIS_STS_VALID) != 0;
+                        let need_irq: bool = ((self.locs[locty as usize].sts & TPM_TIS_STS_VALID) == 0);
 
                         let len = self.tpm_cmd_get_size(); //IMPLEMENT
                         if len > self.rw_offset as u32 {
