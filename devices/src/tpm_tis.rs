@@ -318,6 +318,9 @@ impl TPMIsa {
 
     /* TpmIsa helper functions */
     fn tpm_cmd_get_size(&mut self) -> u32 {
+        if self.buffer.len() == 0 {
+            return 0
+        }
         let size: [u8; 4] = self.buffer[2..2+4].try_into().expect("tpm_util_is_selftest: slice with incorrect length");
         u32::from_ne_bytes(size).to_be()
     }
