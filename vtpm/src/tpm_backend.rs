@@ -298,7 +298,7 @@ impl TPMEmulator {
             } else {
                 msg.set_mem(MemberType::Response);
             }
-            warn!("Success: {:?}", output);
+           // warn!("Success: {:?}", output);
         }
         // std::mem::drop(guard);
         0
@@ -345,13 +345,13 @@ impl TPMEmulator {
             if cmd.selftest_done {
                 cmd.selftest_done = false;
                 let input = &cmd.input;
-                is_selftest = tpm_util_is_selftest((&input).to_vec(), cmd.input_len);
+                is_selftest = tpm_util_is_selftest((input).to_vec(), cmd.input_len);
             }
 
             //qio_channel_write_all
             let iov = &[IoVec::from_slice(cmd.input.as_slice())];
             let ret = sendmsg(self.data_ioc, iov, &[], MsgFlags::empty(), None).expect("char.rs: ERROR ON send_full sendmsg") as isize;
-            if ret != 0 {
+            if ret <= 0 {
                 return -1
             }
 
@@ -554,20 +554,24 @@ impl TPMEmulator {
             // error_report_err(err);
             return -1
         }
-        self.tpm_backend_request_completed();
+        //self.tpm_backend_request_completed();
         0
     }
 
-    pub fn deliver_request(&mut self, cmd: &mut TPMBackendCmd) -> isize {
+    pub fn deliver_request(&mut self, cmd: &mut TPMBackendCmd) -> (isize, Vec<u8>) {
         //tpm_backend_deliver_request
         warn!("Deliver Request Backend");
         if self.cmd.is_none() {
             warn!("Valid Command");
             self.cmd = Some(cmd.clone());
+            //self.cmd.replace(cmd.clone());
 
-            return self.worker_thread()
+            let ret = self.worker_thread();
+            let output = self.cmd.as_ref().unwrap().output.clone();
+            self.tpm_backend_request_completed();
+            return (ret, output)
         }
-        -1
+        (-1, vec![])
     }
 }
 
@@ -584,7 +588,7 @@ impl TPMBackend {
         }
     }
 
-    pub fn deliver_request(&mut self, mut cmd: &mut TPMBackendCmd) -> isize{
+    pub fn deliver_request(&mut self, mut cmd: &mut TPMBackendCmd) -> (isize, Vec<u8>){
         self.backend.deliver_request(&mut cmd)
     }
 

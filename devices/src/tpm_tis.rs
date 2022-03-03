@@ -340,12 +340,12 @@ impl TPMIsa {
 
     /* raise an interrupt if allowed */
     fn tpm_tis_raise_irq(&mut self, locty: u8, irqmask: u32) {
-        warn!("Raise IRQ, locty {:?}", locty);
         if !(locty < 5) {
             return;
         }
 
         if (self.locs[locty as usize].inte & TPM_TIS_INT_ENABLED != 0) && (self.locs[locty as usize].inte & irqmask != 0) {
+            warn!("Raise IRQ, locty {:?}", locty);
             self.trigger_interrupt();
             self.locs[locty as usize].ints |= irqmask;
         }
@@ -357,7 +357,7 @@ impl TPMIsa {
     fn tpm_tis_data_read(&mut self, locty: u8) -> u8 {
         let mut ret = TPM_TIS_NO_DATA_BYTE as u8;
         let len: u32;
-
+        //warn!("PPK: FIFO Read, buffer = {:?}", self.buffer);
         if (self.locs[locty as usize].sts & TPM_TIS_STS_DATA_AVAILABLE) != 0 {
             len = cmp::min(self.tpm_cmd_get_size() as u32, self.be_buffer_size as u32);
             ret = self.buffer[self.rw_offset as usize];
@@ -444,12 +444,19 @@ impl TPMIsa {
      */
     fn tpm_backend_deliver_request(&mut self) {
         warn!("tpm_backend_deliver_request");
-        if let Some(ref mut cmd) = self.cmd {
-            if self.be_driver.deliver_request(cmd) == 0 {
-                let locty = cmd.locty;
+        if let Some(ref mut lcmd) = self.cmd {
+            let (ret, output) = self.be_driver.deliver_request(lcmd);
+            self.buffer.clear();
+            self.buffer.clone_from(&output);
+            warn!("PPK: Buffer Capacity after copy = {:?}, buffer.len = {:?} output.len = {:?}", self.buffer.capacity(), self.buffer.len(), output.len());
+
+            if ret == 0 {
+               // let output = self.be_driver.backend.cmd.
+                //lcmd.output.clone_from(lcmd.)
+                let locty = lcmd.locty;
                 assert!(locty < 5);
 
-                if cmd.selftest_done {
+                if lcmd.selftest_done {
                     for l in 0..TPM_TIS_NUM_LOCALITIES-1 {
                         self.locs[l as usize].sts |= 1<<2;
                     }
@@ -457,7 +464,7 @@ impl TPMIsa {
 
                 self.tpm_tis_sts_set(locty, TPM_TIS_STS_VALID | TPM_TIS_STS_DATA_AVAILABLE);
                 self.locs[locty as usize].state = TPMTISState::TpmTisStateCompletion;
-
+                self.rw_offset = 0;
                 // tpm_util_show_buffer(s->buffer, s->be_buffer_size, "From TPM");
 
                 if self.next_locty < 5 {
@@ -537,7 +544,7 @@ impl TPMIsa {
             locty: locty,
             input: self.buffer.clone(),
             input_len: self.rw_offset as u32,
-            output: self.buffer.clone(),
+            output: vec![0;self.be_buffer_size],   // initialize zeroed vector with full length. len is used while reading output with recvfrom
             output_len: self.be_buffer_size as isize,
             selftest_done: false,
         });
@@ -557,8 +564,8 @@ impl TPMIsa {
         //warn!("Shift to use: {}", shift);
         //warn!("Locty to use: {}", locty);
         //warn!("Active Locty: {}", self.active_locty);
-        warn!("mmio.write start base: {:#X}, offset: {:#X}, data: {:?}, Current STS: {:#X}", _base, offset, data, self.locs[locty as usize].sts); //DEBUG
-
+        warn!("mmio.write start base: {:#X}, offset: {:#X}, data: {:?}, Current STS: {:#X}, rw_offset = {:?}", _base, offset, data, self.locs[locty as usize].sts, self.rw_offset); //DEBUG
+        //warn!("mmio.write start buffer: {:#?}", self.buffer); //DEBUG
         // if self.tpm_backend_had_startup_error(self) {
         //     return Err(Error::TPMBackendFailure);
         // }
@@ -783,8 +790,12 @@ impl TPMIsa {
                     }
                     while (self.locs[locty as usize].sts & TPM_TIS_STS_EXPECT) != 0 && size > 0 {
                         if self.rw_offset < self.be_buffer_size as u16 {
+                           if (self.rw_offset == 0) {   // clear the current buffer
+                                self.buffer.clear();
+                                warn!("PPK: cleared buffer in handle_write(), capacity = {:?}", self.buffer.capacity());
+                            }
                             self.buffer.push(val as u8);
-                            // self.buffer[self.rw_offset as usize] = val as u8;
+                            //self.buffer.insert(self.rw_offset as usize, val as u8);
                             self.rw_offset += 1;
                             val >>= 8;
                             size -= 1;
@@ -870,7 +881,7 @@ impl TPMIsa {
                 return Err(Error::BadWriteOffset(offset));
             }
         }
-        warn!("mmio.write end: End STS: {:#X}", self.locs[locty as usize].sts);
+        warn!("mmio.write end: End STS: {:#X}, rw_offset = {:?}", self.locs[locty as usize].sts, self.rw_offset);
         Ok(())
     }
 }
