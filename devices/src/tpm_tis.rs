@@ -560,6 +560,7 @@ impl TPMIsa {
         let mut size = data.len();
         let addr = _base + offset;
         let mut set_new_locty = 1;
+        let offset = offset & 0xffc;
 
         //warn!("Shift to use: {}", shift);
         //warn!("Locty to use: {}", locty);
@@ -890,11 +891,13 @@ impl BusDevice for TPMIsa {
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]) {
         warn!(""); // Separator
         let locty: u8 = tpm_tis_locality_from_addr(base + offset);
+        let mut shift: u8 = (((base + offset) & 0x3) * 8) as u8;
+        let offset = offset & 0xffc;
         let addr: u64 = base + offset;
         let mut avail: u32;
         let mut size = data.len();
         let mut v: u8;
-        let mut shift: u8 = (((base + offset) & 0x3) * 8) as u8;
+
         let mut read_ok = true;
         let mut val: u32 = 0xffffffff;
         // self.count +=1;
@@ -1025,7 +1028,7 @@ impl BusDevice for TPMIsa {
             for (byte, read) in data.iter_mut().zip(<u32>::to_le_bytes(val).iter().cloned()) {
                 *byte = read as u8;
             }
-            warn!("mmio.read end: offset: {:#X}, data: {:?}, status = {:#X}", offset, data, self.locs[locty as usize].sts);
+            warn!("mmio.read end: offset: {:#X}, data: {:?}, status = {:#X} val = {:#X}", offset, data, self.locs[locty as usize].sts, val);
 
         } else {
             warn!(
