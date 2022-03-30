@@ -4263,10 +4263,8 @@ fn numa_node_id_from_memory_zone_id(numa_nodes: &NumaNodes, memory_zone_id: &str
     None
 }
 
-#[cfg(feature = "acpi")]
 struct VTPMDevice {}
 
-#[cfg(feature = "acpi")]
 impl Aml for VTPMDevice {
     fn to_aml_bytes(&self) -> Vec<u8> {
         aml::Device::new(
@@ -4287,7 +4285,6 @@ impl Aml for VTPMDevice {
     }
 }
 
-#[cfg(feature = "acpi")]
 impl Aml for DeviceManager {
     fn append_aml_bytes(&self, bytes: &mut Vec<u8>) {
         #[cfg(target_arch = "aarch64")]
