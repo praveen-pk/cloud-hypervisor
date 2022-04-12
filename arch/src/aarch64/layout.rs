@@ -96,8 +96,15 @@ pub const PCI_MMIO_CONFIG_SIZE_PER_SEGMENT: u64 = 4096 * 256;
 pub const VTPM_START: GuestAddress = GuestAddress(0xFED40000);
 pub const VTPM_SIZE: u64 = 0x5000;
 
-/// Start of RAM on 64 bit ARM.
-pub const RAM_64BIT_START: u64 = 0x4000_0000;
+/// Start of RAM.
+pub const RAM_START: GuestAddress = GuestAddress(0x4000_0000);
+
+/// 32-bit reserved area: 64MiB before 4GiB
+pub const MEM_32BIT_RESERVED_START: GuestAddress = GuestAddress(0xfc00_0000);
+pub const MEM_32BIT_RESERVED_SIZE: u64 = 0x0400_0000;
+
+/// Start of 64-bit RAM.
+pub const RAM_64BIT_START: GuestAddress = GuestAddress(0x1_0000_0000);
 
 /// Kernel command line maximum size.
 /// As per `arch/arm64/include/uapi/asm/setup.h`.
