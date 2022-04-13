@@ -521,6 +521,7 @@ fn create_devices_node<T: DeviceInfoForFdt + Clone + Debug, S: ::std::hash::Buil
             DeviceType::Gpio => create_gpio_node(fdt, info)?,
             DeviceType::Rtc => create_rtc_node(fdt, info)?,
             DeviceType::Serial => create_serial_node(fdt, info)?,
+            DeviceType::Tpm => create_tis_tpm_node(fdt, info)?,
             DeviceType::Virtio(_) => {
                 ordered_virtio_device.push(info);
             }
@@ -555,6 +556,23 @@ fn create_pmu_node(fdt: &mut FdtWriter, cpu_nums: usize) -> FdtWriterResult<()> 
     fdt.property_string("compatible", compatible)?;
     fdt.property_array_u32("interrupts", &irq)?;
     fdt.end_node(pmu_node)?;
+    Ok(())
+}
+
+fn create_tis_tpm_node<T: DeviceInfoForFdt + Clone + Debug>(
+    fdt: &mut FdtWriter,
+    dev_info: &T,
+) -> FdtWriterResult<()> {
+    let compatible = "tcg,tpm-tis-mmio";
+    let irq = [GIC_FDT_IRQ_TYPE_SPI, dev_info.irq(), IRQ_TYPE_EDGE_RISING];
+
+    let tpm_node_name = format!("tpm@{:X}", dev_info.addr());
+    let tpm_tis_node = fdt.begin_node(&tpm_node_name)?;
+    let tpm_tis_reg_prop = [dev_info.addr(), dev_info.length()];
+    fdt.property_string("compatible", compatible)?;
+    fdt.property_array_u32("interrupts", &irq)?;
+    fdt.property_array_u64("reg", &tpm_tis_reg_prop)?;
+    fdt.end_node(tpm_tis_node)?;
     Ok(())
 }
 
