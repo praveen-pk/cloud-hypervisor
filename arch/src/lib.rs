@@ -139,6 +139,9 @@ pub enum DeviceType {
     /// Device Type: GPIO.
     #[cfg(target_arch = "aarch64")]
     Gpio,
+    /// Device Type: TPM.
+    #[cfg(target_arch = "aarch64")]
+    Tpm,
 }
 
 /// Default (smallest) memory page size for the supported architectures.
