@@ -1759,6 +1759,14 @@ impl DeviceManager {
             .insert(vtpm.clone(), arch::layout::VTPM_START.0, arch::layout::VTPM_SIZE)
             .map_err(DeviceManagerError::BusError)?;
 
+        self.id_to_dev_info.insert(
+                (DeviceType::Tpm, "tpm".to_string()),
+                MmioDeviceInfo {
+                    addr: arch::layout::VTPM_START.0,
+                    len: arch::layout::VTPM_SIZE,
+                    irq: irq_num as InterruptIndex,
+                },
+            );
         Ok(vtpm)
     }
 
