@@ -81,7 +81,7 @@ impl SocketCharDev {
                     self.ctrl_fd = fd;
                     self.stream = Some(s);
                     self.state = ChardevState::ChardevStateConnected;
-             warn!("PPK: Connected to socket path : {:?}\n", socket_path);
+             debug!("PPK: Connected to socket path : {:?}\n", socket_path);
 
                     return 0
                 }
@@ -93,7 +93,7 @@ impl SocketCharDev {
                 break err;
             }
         };
-        
+
         // error!(
         //     "Failed connecting the backend after trying for 1 minute: {:?}",
         //     err
@@ -114,9 +114,9 @@ impl SocketCharDev {
             return 0
         }
         //SET BLOCKING
-        warn!("sync read state connected");
+        debug!("sync read state connected");
         let size = recv(self.ctrl_fd, buf, MsgFlags::empty()).expect("char.rs: sync_read recvmsg error");
-        warn!("success recv");
+        debug!("success recv");
         size as isize
     }
 
@@ -125,21 +125,21 @@ impl SocketCharDev {
         let write_fd = self.write_msgfd;
         let write_vec = &[write_fd];
         let cmsgs = &[ControlMessage::ScmRights(write_vec)];
-        warn!("send full message");
+        debug!("send full message");
 
         sendmsg(self.ctrl_fd, iov, cmsgs, MsgFlags::empty(), None).expect("char.rs: ERROR ON send_full sendmsg") as isize
     }
 
     pub fn chr_write(&mut self, buf: &mut [u8], len:usize) -> isize {
         let mut res = 0;
-        warn!("CHR_WRITE HAPPENED");
+        debug!("CHR_WRITE HAPPENED");
 
         if let Some(ref mut sock) = self.stream {
             // let guard = self.chr_write_lock.lock().unwrap();
             {
                 res = match self.state {
                     ChardevState::ChardevStateConnected => {
-                        warn!("State Connected");
+                        debug!("State Connected");
                         let ret = self.send_full(buf, len);
                         /* free the written msgfds in any cases
                         * other than ret < 0 */
@@ -159,7 +159,7 @@ impl SocketCharDev {
                     _ => -1,
                 };
             }
-            warn!("WRITE SUCCESS");
+            debug("WRITE SUCCESS");
             // std::mem::drop(guard);
 
             res
@@ -170,10 +170,10 @@ impl SocketCharDev {
 
     pub fn chr_read(&mut self, buf: &mut [u8], len: usize) -> isize {
         //Grab all response bytes so none is left behind
-        warn!("CHR_READ HAPPENED");
+        debug!("CHR_READ HAPPENED");
 
         let mut newbuf: &mut [u8] = &mut [0; TPM_TIS_BUFFER_MAX];
-        
+
         if let Some(ref mut sock) = self.stream {
             sock.read(&mut newbuf);
             byte_copy(&newbuf, buf);
@@ -199,13 +199,13 @@ impl CharBackend {
 
     pub fn chr_fe_init(&mut self) -> isize {
         let mut sockdev = SocketCharDev::new();
-        warn!("PPK: chr_fe_init invoked\n");
+        debug!("PPK: chr_fe_init invoked\n");
         let res = sockdev.connect("/tmp/swtpm/swtpm-sock");
         self.chr = Some(sockdev);
         if res < 0 {
             return -1
         }
-        
+
         self.fe_open = true;
         0
     }
@@ -260,7 +260,7 @@ impl CharBackend {
      */
     pub fn chr_fe_read_all(&mut self, mut buf: &mut [u8], len: usize) -> isize {
         if let Some(ref mut dev) = self.chr {
-            warn!("Made it to sync");
+            debug!("Made it to sync");
             let (s,_) = recvfrom(dev.ctrl_fd, &mut buf).expect("char.rs: sync_read recvmsg error");
             s as isize
             // dev.chr_sync_read(&mut buf, len)

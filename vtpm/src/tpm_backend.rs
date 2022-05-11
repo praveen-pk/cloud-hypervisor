@@ -253,15 +253,15 @@ impl TPMEmulator {
     }
 
     fn tpm_emulator_ctrlcmd<'a>(&mut self, cmd: Commands, msg: &'a mut dyn Ptm, msg_len_in: usize, msg_len_out: usize) -> isize {
-        warn!("\n Control command sent: {:?}", cmd);
-        warn!("tpm_emulator_ctrlcmd(cmd?, msg?, msg_len_in: {}, msg_len_out: {})",  msg_len_in, msg_len_out);
+        debug!("\n Control command sent: {:?}", cmd);
+        debug!("tpm_emulator_ctrlcmd(cmd?, msg?, msg_len_in: {}, msg_len_out: {})",  msg_len_in, msg_len_out);
 
         // let dev: TPMDevice = self.tpm;
         let cmd_no = (cmd as u32).to_be_bytes();
         let n: isize = (mem::size_of::<u32>() + msg_len_in) as isize;
 
         let converted_req = msg.convert_to_reqbytes();
-        warn!("converted msg: {:?}", converted_req);
+        debug!("converted msg: {:?}", converted_req);
 
         // let mut input_buf; //Create command buf
 
@@ -271,7 +271,7 @@ impl TPMEmulator {
             let mut buf = Vec::<u8>::with_capacity(n as usize);
             buf.extend(cmd_no);
             buf.extend(converted_req);
-            warn!("Full message {:?}", buf);
+            debug!("Full message {:?}", buf);
 
             let mut res = self.ctrl_chr.chr_fe_write_all(&mut buf, n as usize);
             if res <= 0 {
@@ -287,9 +287,9 @@ impl TPMEmulator {
             let mut output = [0 as u8; TPM_TIS_BUFFER_MAX];
 
             if msg_len_out != 0 {
-                warn!("MSG_LEN_OUT != 0");
+                debug!("MSG_LEN_OUT != 0");
                 res = self.ctrl_chr.chr_fe_read_all(&mut output, msg_len_out);
-                warn!("Made it past read all");
+                debug!("Made it past read all");
                 if res <= 0 {
                     // std::mem::drop(guard);
                     return -1;
@@ -298,7 +298,7 @@ impl TPMEmulator {
             } else {
                 msg.set_mem(MemberType::Response);
             }
-           // warn!("Success: {:?}", output);
+           // debug!("Success: {:?}", output);
         }
         // std::mem::drop(guard);
         0
@@ -376,14 +376,14 @@ impl TPMEmulator {
 
         psbs.req.buffersize = (wantedsize as u32).to_be();
 
-        warn!("Send set buffer size command");
+        debug!("Send set buffer size command");
         if self.tpm_emulator_ctrlcmd(Commands::CmdSetBufferSize, &mut psbs, mem::size_of::<u32>(), 4*mem::size_of::<u32>()) < 0 {
             //error_report("tpm-emulator: Could not set buffer size: %s", strerror(errno));
             return -1;
         }
 
         psbs.tpm_result = u32::from_be(psbs.tpm_result);
-        warn!("tpm_result: {}", psbs.tpm_result);
+        debug!("tpm_result: {}", psbs.tpm_result);
 
         if psbs.tpm_result != 0 {
             // error_report("tpm-emulator: TPM result for set buffer size : 0x%x %s",
@@ -393,7 +393,7 @@ impl TPMEmulator {
             return -1;
         }
 
-        warn!("buffersize: {}", psbs.resp.bufsize);
+        debug!("buffersize: {}", psbs.resp.bufsize);
 
         *actualsize = psbs.resp.bufsize as usize;
 
@@ -411,15 +411,15 @@ impl TPMEmulator {
     }
 
     pub fn get_tpm_established_flag(&mut self) -> bool {
-        warn!("get_tpm_established_flag function called");
+        debug!("get_tpm_established_flag function called");
         let mut est: PtmEst = PtmEst::new();
 
         if self.established_flag_cached == 1 {
-            warn!("established_flag already cachedd");
+            debug!("established_flag already cachedd");
             return self.established_flag == 1
         }
 
-        warn!("call tpm_emulator_ctrlcmd: CmdGetTpmEstablished");
+        debug!("call tpm_emulator_ctrlcmd: CmdGetTpmEstablished");
         if self.tpm_emulator_ctrlcmd(Commands::CmdGetTpmEstablished, &mut est, 0, 2*mem::size_of::<u32>()) < 0 {
             // error_report("tpm-emulator: Could not get the TPM established flag: %s",
             //         strerror(errno));
@@ -434,7 +434,7 @@ impl TPMEmulator {
     }
 
     pub fn reset_tpm_established_flag(&mut self, locty: u8) -> isize {
-        warn!("Reset Established Flag");
+        debug!("Reset Established Flag");
         let mut reset_est: PtmResetEst = PtmResetEst::new();
 
         /* only a TPM 2.0 will support this */
@@ -494,7 +494,7 @@ impl TPMEmulator {
     }
 
     pub fn set_locality(&mut self) -> isize {
-        warn!("Set Locality");
+        debug!("Set Locality");
         let mut loc: PtmLoc = PtmLoc::new();
         let cmd = match self.cmd.clone() {
             None => return -1,
@@ -510,11 +510,11 @@ impl TPMEmulator {
         // if  < 0 {
         //     // error_setg(errp, "tpm-emulator: could not set locality : %s",
         //     //    strerror(errno));
-        //     warn!("ERROR SENDING SET LOCALITY");
+        //     debug!("ERROR SENDING SET LOCALITY");
         //     panic!("ERROR SENDING SET LOCALITY");
         //     return -1
         // }
-        warn!("Successful SEnd Set Locality");
+        debug!("Successful SEnd Set Locality");
 
         loc.tpm_result = u32::from_be(loc.tpm_result);
         if loc.tpm_result != 0 {
@@ -537,7 +537,7 @@ impl TPMEmulator {
 
 
     pub fn handle_request(&mut self) -> isize {
-        warn!("Handle Request");
+        debug!("Handle Request");
         if self.cmd.is_some() {
             if self.set_locality() < 0 || self.unix_tx_bufs() < 0 {
                 return -1
@@ -548,7 +548,7 @@ impl TPMEmulator {
     }
 
     pub fn worker_thread(&mut self) -> isize {
-        warn!("Worker Thread");
+        debug!("Worker Thread");
         let err = self.handle_request();
         if err < 0 {
             // error_report_err(err);
@@ -560,9 +560,9 @@ impl TPMEmulator {
 
     pub fn deliver_request(&mut self, cmd: &mut TPMBackendCmd) -> (isize, Vec<u8>) {
         //tpm_backend_deliver_request
-        warn!("Deliver Request Backend");
+        debug!("Deliver Request Backend");
         if self.cmd.is_none() {
-            warn!("Valid Command");
+            debug!("Valid Command");
             self.cmd = Some(cmd.clone());
             //self.cmd.replace(cmd.clone());
 
