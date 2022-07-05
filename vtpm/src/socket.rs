@@ -41,6 +41,7 @@ enum SocDevState {
 /// of the two slices.
 ///
 /// Return the number of bytes written.
+///TODO::: this should be dropped
 fn byte_copy(from: &[u8], mut to: &mut [u8]) -> usize {
     to.write(from).unwrap()
 }
@@ -65,6 +66,11 @@ impl SocketDev {
             ctrl_fd: -1,
             data_fd: -1,
         }
+    }
+
+    pub fn init(&mut self, path: String) -> Result<()> {
+        let _ = self.connect(&path)?;
+        Ok(())
     }
 
     pub fn connect(&mut self, socket_path: &str) -> Result<isize> {
@@ -92,7 +98,7 @@ impl SocketDev {
             }
         }
         Err(TPMSocError::TPMSocCannotConnect(anyhow!(
-            "Failed to connect to vTPM socket path"
+            "Failed to connect to vTPM Socket"
         )))
     }
 
@@ -104,7 +110,7 @@ impl SocketDev {
         self.write_msgfd = fd;
     }
 
-    pub fn chr_sync_read(&self, buf: &mut [u8], _len: usize) -> Result<usize> {
+    pub fn sync_read(&self, buf: &mut [u8], _len: usize) -> Result<usize> {
         if self.state != SocDevState::SocDevStateConnected {
             return Ok(0);
         }
@@ -129,15 +135,14 @@ impl SocketDev {
         // Send Ancillary data, along with cmds and data
         let size = sendmsg(self.ctrl_fd, iov, cmsgs, MsgFlags::empty(), None).map_err(|e| {
             TPMSocError::TPMSocFailedWrite(anyhow!(
-                "Failed to write to vTPM Socket. Error Code {:?}",
-                e
+                "Failed to write to vTPM Socket. Error Code {:?}", e
             ))
         })?;
         Ok(size as usize)
     }
 
-    pub fn chr_write(&mut self, buf: &mut [u8], len:usize) -> Result<usize> {
-        debug!("chr_write initialized");
+    pub fn write(&mut self, buf: &mut [u8], len:usize) -> Result<usize> {
+        debug!("write initialized");
 
         if let Some(ref mut _sock) = self.stream {
                let res = match self.state {
@@ -145,14 +150,14 @@ impl SocketDev {
                         warn!("State Connected");
                         let ret = self.send_full(buf, len)?;
                         // swtpm will receive data Fd after a successful send
-                        // reset write_msgfd after a successful send
+                        // reset cached write_msgfd after a successful send
                         self.write_msgfd = 0;
                         ret
                     },
                     _ => return Err(TPMSocError::TPMSocFailedWrite(anyhow!(
                         "TPM Socket was not in Connected State"))),
             };
-            debug!("chr_write succeeded");
+            debug!("write succeeded");
 
             Ok(res)
         } else {
@@ -160,9 +165,9 @@ impl SocketDev {
         }
     }
 
-    pub fn chr_read(&mut self, buf: &mut [u8], _len: usize) -> Result<usize> {
+    pub fn read(&mut self, buf: &mut [u8], _len: usize) -> Result<usize> {
         //Grab all response bytes so none is left behind
-        debug!("chr_read initialized");
+        debug!("read initialized");
 
         let mut newbuf: &mut [u8] = &mut [0; TPM_TIS_BUFFER_MAX];
 
@@ -171,13 +176,15 @@ impl SocketDev {
                 "Failed to read from vTPM Socket. Error Code {:?}",
                 e
             )))?;
-            byte_copy(&newbuf, buf);
+            byte_copy(&newbuf, buf);  //TODO: Replace with proper copy
             Ok(size)
         } else {
             return Err(TPMSocError::TPMSocFailedRead(anyhow!("Stream for TPM Socket was not initialized")))
         }
     }
 }
+
+/***
 /// This is the backend seen by frontend
 /// Actual Backend is SocketCharDev
 pub struct CharBackend {
@@ -234,7 +241,7 @@ impl CharBackend {
      */
     pub fn chr_be_write_all(&mut self, buf: &mut [u8], len: usize) -> Result<usize> {
         if let Some(ref mut dev) = self.chr {
-            dev.chr_write(buf, len)
+            dev.write(buf, len)
         } else {
             return Err(TPMSocError::TPMSocBackendConfigureFailed(anyhow!("SocketCharDev was not initialized")))
         }
@@ -262,3 +269,4 @@ impl CharBackend {
         }
     }
 }
+***/
