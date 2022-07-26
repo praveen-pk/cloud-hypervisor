@@ -4,7 +4,7 @@
 //
 
 use anyhow::anyhow;
-use nix::sys::socket::{recv, recvfrom, sendmsg, ControlMessage, MsgFlags};
+use nix::sys::socket::{sendmsg, ControlMessage, MsgFlags};
 use nix::sys::uio::IoVec;
 use std::io::prelude::*;
 use std::io::Write;
@@ -20,13 +20,11 @@ const TPM_TIS_BUFFER_MAX: usize = 4096;
 #[derive(Error, Debug)]
 pub enum TPMSocError {
     #[error("Cannot connect to TPM Socket even after retrying for 1 min")]
-    TPMSocCannotConnect(#[source] anyhow::Error),
+    ConnectToTPMSocket(#[source] anyhow::Error),
     #[error("Failed to read from TPM socket")]
-    TPMSocFailedRead(#[source] anyhow::Error),
+    ReadTPMSoc(#[source] anyhow::Error),
     #[error("Failed to write to TPM socket")]
-    TPMSocFailedWrite(#[source] anyhow::Error),
-    #[error("Failed to configure TPM Char backend")]
-    TPMSocBackendConfigureFailed(#[source] anyhow::Error)
+    WriteTPMSocket(#[source] anyhow::Error)
 }
 type Result<T> = anyhow::Result<T, TPMSocError>;
 
@@ -73,7 +71,7 @@ impl SocketDev {
         Ok(())
     }
 
-    pub fn connect(&mut self, socket_path: &str) -> Result<isize> {
+    pub fn connect(&mut self, socket_path: &str) -> Result<()> {
         self.state = SocDevState::SocDevStateConnecting;
 
         let now = Instant::now();
@@ -87,7 +85,7 @@ impl SocketDev {
                     self.stream = Some(s);
                     self.state = SocDevState::SocDevStateConnected;
                     debug!("Connected to vTPM socket path : {:?}\n", socket_path);
-                    return Ok(0);
+                    return Ok(());
                 }
                 Err(_e) => {}
             };
@@ -97,7 +95,7 @@ impl SocketDev {
                 break;
             }
         }
-        Err(TPMSocError::TPMSocCannotConnect(anyhow!(
+        Err(TPMSocError::ConnectToTPMSocket(anyhow!(
             "Failed to connect to vTPM Socket"
         )))
     }
@@ -110,7 +108,7 @@ impl SocketDev {
         self.write_msgfd = fd;
     }
 
-    pub fn sync_read(&self, buf: &mut [u8], _len: usize) -> Result<usize> {
+    /*pub fn sync_read(&self, buf: &mut [u8], _len: usize) -> Result<usize> {
         if self.state != SocDevState::SocDevStateConnected {
             return Ok(0);
         }
@@ -123,7 +121,7 @@ impl SocketDev {
         })?;
         debug!("sync read completed");
         Ok(size as usize)
-    }
+    }*/
 
     pub fn send_full(&self, buf: &mut [u8], _len: usize) -> Result<usize> {
         let iov = &[IoVec::from_slice(buf)];
@@ -134,7 +132,7 @@ impl SocketDev {
 
         // Send Ancillary data, along with cmds and data
         let size = sendmsg(self.ctrl_fd, iov, cmsgs, MsgFlags::empty(), None).map_err(|e| {
-            TPMSocError::TPMSocFailedWrite(anyhow!(
+            TPMSocError::WriteTPMSocket(anyhow!(
                 "Failed to write to vTPM Socket. Error Code {:?}", e
             ))
         })?;
@@ -154,32 +152,32 @@ impl SocketDev {
                         self.write_msgfd = 0;
                         ret
                     },
-                    _ => return Err(TPMSocError::TPMSocFailedWrite(anyhow!(
+                    _ => return Err(TPMSocError::WriteTPMSocket(anyhow!(
                         "TPM Socket was not in Connected State"))),
             };
             debug!("write succeeded");
 
             Ok(res)
         } else {
-            return Err(TPMSocError::TPMSocFailedWrite(anyhow!("Stream for TPM Socket was not initialized")))
+            Err(TPMSocError::WriteTPMSocket(anyhow!("Stream for TPM Socket was not initialized")))
         }
     }
 
-    pub fn read(&mut self, buf: &mut [u8], _len: usize) -> Result<usize> {
+    pub fn read(&mut self, buf: &mut [u8]) -> Result<usize> {
         //Grab all response bytes so none is left behind
         debug!("read initialized");
 
         let mut newbuf: &mut [u8] = &mut [0; TPM_TIS_BUFFER_MAX];
 
         if let Some(ref mut sock) = self.stream {
-            let size:usize = sock.read(&mut newbuf).map_err(|e| TPMSocError::TPMSocFailedRead(anyhow!(
+            let size:usize = sock.read(&mut newbuf).map_err(|e| TPMSocError::ReadTPMSoc(anyhow!(
                 "Failed to read from vTPM Socket. Error Code {:?}",
                 e
             )))?;
             byte_copy(&newbuf, buf);  //TODO: Replace with proper copy
             Ok(size)
         } else {
-            return Err(TPMSocError::TPMSocFailedRead(anyhow!("Stream for TPM Socket was not initialized")))
+           Err(TPMSocError::ReadTPMSoc(anyhow!("Stream for TPM Socket was not initialized")))
         }
     }
 }
