@@ -11,7 +11,10 @@
 extern crate bitflags;
 #[macro_use]
 extern crate log;
+#[macro_use]
+extern crate phf;
 
+pub mod tpm;
 pub mod acpi;
 #[cfg(target_arch = "aarch64")]
 pub mod gic;

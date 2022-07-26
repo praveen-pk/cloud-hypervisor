@@ -19,7 +19,8 @@ vm-device = { path = "../vm-device" }
 vm-memory = "0.8.0"
 vm-migration = { path = "../vm-migration" }
 vmm-sys-util = "0.10.0"
-
+vtpm = { path = "../vtpm" }
+phf = { version = "0.11", features = ["macros"] }
 [target.'cfg(target_arch = "aarch64")'.dependencies]
 arch = { path = "../arch" }
 
