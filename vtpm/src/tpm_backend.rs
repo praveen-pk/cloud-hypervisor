@@ -62,7 +62,7 @@ pub enum TPMEmuError {
     PrepareDataFd(#[source] anyhow::Error),
     #[error("Failed to run Control Cmd: {0}")]
     RunTPMCtrlCmd(#[source] anyhow::Error),
-    #[error("TPM Backend doesn't implement min required capabilities: {0}")]
+    #[error("TPM Emulator doesn't implement min required capabilities: {0}")]
     TPMCheckCaps(#[source] anyhow::Error),
 }
 
@@ -283,4 +283,19 @@ impl TPMEmulator {
             return false;
         }
     }
+
+    pub fn cancel_cmd(&mut self) -> Result<()> {
+        let mut res: PtmRes = 0;
+
+        // If Emulator implements all caps
+        if !((self.caps & (1 << 5)) == ((1 << 5))) {
+            return Err(TPMEmuError::TPMCheckCaps(anyhow!(
+                "Emulator does not implement Capabilities to Cancel Commands"
+            )));
+        }
+        /* FIXME: make the function non-blocking, or it may block a VCPU */
+        self.tpm_emulator_ctrlcmd(Commands::CmdCancelTpmCmd, &mut res, 0, mem::size_of::<u32>())?;
+        Ok(())
+    }
+
 }
