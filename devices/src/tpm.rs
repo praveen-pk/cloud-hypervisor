@@ -65,7 +65,7 @@ const CRB_LOC_STATE:u32 = 0x0;
 // Field => (start, length)
 // start: lowest bit in the bit field numbered from 0
 // length: length of the bit field
-const CRB_LOC_STATE_fields:phf::Map<&str,[u32;2]> = phf_map! {
+const CRB_LOC_STATE_FIELDS:phf::Map<&str,[u32;2]> = phf_map! {
     "tpmEstablished" => [0, 1],
     "locAssigned" => [1,1],
     "activeLocality"=> [2, 3],
@@ -125,13 +125,27 @@ const TPM_CRB_NO_LOCALITY:u32 = 0xff;
 
 //TODO: this value is duplicated.
 const TPM_CRB_ADDR_BASE:u32 = 0xFED40000;
+const TPM_CRB_ADDR_SIZE:u32 = 0x1000;
+
 const TPM_CRB_ADDR_CTRL:u32 =TPM_CRB_ADDR_BASE + CRB_CTRL_REQ;
 const TPM_CRB_R_MAX:u32 = CRB_DATA_BUFFER;
+
+// CRB Protocol details
+const CRB_INTF_TYPE_CRB_ACTIVE:u32 = 0x0b1;
+const CRB_INTF_VERSION_CRB:u32 = 0x0b1;
+const CRB_INTF_CAP_LOCALITY_0_ONLY:u32 = 0x0b0;
+const CRB_INTF_CAP_IDLE_FAST:u32 = 0x0b0;
+const CRB_INTF_CAP_XFER_SIZE_64:u32 = 0x0b11;
+const CRB_INTF_CAP_FIFO_NOT_SUPPORTED:u32 = 0x0b0;
+const CRB_INTF_CAP_CRB_SUPPORTED:u32 = 0x0b1;
+const CRB_INTF_IF_SELECTOR_CRB:u32 = 0x0b1;
+
+const CRB_CTRL_CMD_SIZE:u32 = (TPM_CRB_ADDR_SIZE - CRB_DATA_BUFFER);
 
 
 fn get_fields_map(reg:u32) -> phf::Map<&'static str,[u32;2]> {
     match reg {
-        CRB_LOC_STATE => {return CRB_LOC_STATE_fields;},
+        CRB_LOC_STATE => {return CRB_LOC_STATE_FIELDS;},
         CRB_INTF_ID => {return CRB_INTF_ID_fields;},
         CRB_INTF_ID2 => {return CRB_INTF_ID2_fields;},
         CRB_CTRL_STS => {return CRB_CTRL_STS_fields;}
@@ -177,14 +191,55 @@ struct TPM {
     emulator: TPMEmulator,
     cmd: Option<TPMBackendCmd>,
     regs: [u32;TPM_CRB_R_MAX as usize],
-    be_buffer_size: usize
+    be_buffer_size: usize,
+    ppi_enabled: bool,
 }
 
-/*impl TPM {
-    fn tpm_get_active_locty(&mut self){
-        get_reg_field (self.regs, CRB_LOC_STATE, "locAssigned")
+impl TPM {
+    fn new(&mut self){
+
+    let tpm = TPM{
+            emulator:  TPMEmulator::new(),
+            cmd: None,
+            regs: [0;TPM_CRB_R_MAX],
+            be_buffer_size: emulator.get_buffer_size(),
+            ppi_enabled: false
+        };
+        tpm.reset();
+        tpm
     }
-}*/
+    fn tpm_get_active_locty(&mut self){
+        return get_reg_field (self.regs, CRB_LOC_STATE, "locAssigned")
+    }
+    fn reset (&mut self) {
+
+    //TODO: Reset TPM Emulator here
+    //        tpm_backend_reset(s->tpmbe);
+        self.regs = [0;TPM_CRB_R_MAX];
+        set_reg_field(self.regs, CRB_LOC_STATE, "tpmRegValidSts", 1);
+        set_reg_field(self.regs, CRB_CTRL_STS, "tpmIdle", 1);
+        set_reg_field(self.regs, CRB_INTF_ID, "InterfaceType", CRB_INTF_TYPE_CRB_ACTIVE);
+        set_reg_field(self.regs, CRB_INTF_ID,"InterfaceVersion", CRB_INTF_VERSION_CRB);
+        set_reg_field(self.regs, CRB_INTF_ID,"CapLocality", CRB_INTF_CAP_LOCALITY_0_ONLY);
+        set_reg_field(self.regs, CRB_INTF_ID, "CapCRBIdleBypass", CRB_INTF_CAP_IDLE_FAST);
+        set_reg_field(self.regs, CRB_INTF_ID, "CapDataXferSizeSupport", CRB_INTF_CAP_XFER_SIZE_64);
+        set_reg_field(self.regs, CRB_INTF_ID,"CapFIFO", CRB_INTF_CAP_FIFO_NOT_SUPPORTED);
+        set_reg_field(self.regs, CRB_INTF_ID, "CapCRB", CRB_INTF_CAP_CRB_SUPPORTED);
+        set_reg_filed(self.regs, CRB_INTF_ID,"InterfaceSelector", CRB_INTF_IF_SELECTOR_CRB);
+        set_reg_field(self.regs, CRB_INTF_ID, "RID", 0x0b0000);
+        set_reg_field(self.regs, CRB_INTF_ID2,"VID", PCI_VENDOR_ID_IBM);
+
+        self.regs[CRB_CTRL_CMD_SIZE] = CRB_CTRL_CMD_SIZE;
+        self.regs[CRB_CTRL_CMD_LADDR] = TPM_CRB_ADDR_BASE + A_CRB_DATA_BUFFER;
+        self.regs[R_CRB_CTRL_RSP_SIZE] = CRB_CTRL_CMD_SIZE;
+        self.regs[R_CRB_CTRL_RSP_ADDR] = TPM_CRB_ADDR_BASE + A_CRB_DATA_BUFFER;
+
+        self.be_buffer_size = MIN(self.emulator.get_buffer_size(),
+                                CRB_CTRL_CMD_SIZE);
+
+        self.emulator.tpm_emulator_startup_tpm();
+    }
+}
 
 //impl BusDevice for TPM
 impl BusDevice for TPM {
