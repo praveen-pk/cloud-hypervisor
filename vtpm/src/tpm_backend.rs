@@ -3,12 +3,15 @@ extern crate nix;
 use crate::socket::SocketDev;
 use crate::tpm_ioctl::{Commands, MemberType, Ptm, PtmCap, PtmEst, PtmRes};
 use anyhow::anyhow;
-use nix::sys::socket::{socketpair, AddressFamily, SockFlag, SockType};
 use std::convert::TryInto;
 use std::mem;
 use std::os::unix::io::RawFd;
 use std::path::Path;
 use thiserror::Error;
+use nix::sys::uio::IoVec;
+use nix::sys::socket::{socketpair, AddressFamily, SockType, SockFlag, sendmsg, recvfrom, MsgFlags };
+
+
 /*
 use std::sync::{Arc, Mutex};
 use std::io::Error as IOError;
@@ -282,6 +285,74 @@ impl TPMEmulator {
         } else {
             return false;
         }
+    }
+
+    /// Function to write to emulator socket and read the response from it
+    fn unix_tx_bufs(&mut self) -> isize {
+        let mut is_selftest: bool = false;
+        if let Some(ref mut cmd) = self.cmd {
+            if cmd.selftest_done {
+                cmd.selftest_done = false;
+                let input = &cmd.input;
+                is_selftest = tpm_util_is_selftest((input).to_vec(), cmd.input_len);
+            }
+
+            //qio_channel_write_all
+            let iov = &[IoVec::from_slice(cmd.input.as_slice())];
+            let ret = sendmsg(self.data_ioc, iov, &[], MsgFlags::empty(), None).expect("char.rs: ERROR ON send_full sendmsg") as isize;
+            if ret <= 0 {
+                return -1
+            }
+
+            //qio_channel_read_all
+            let (size, sock) = recvfrom(self.data_ioc, &mut cmd.output).expect("unix_tx_bufs: sync_read recvmsg error");
+
+            if is_selftest {
+                let errcode: &[u8; 4] = cmd.output[6..6+4].try_into().expect("tpm_util_is_selftest: slice with incorrect length");
+                cmd.selftest_done = u32::from_ne_bytes(*errcode).to_be() == 0;
+            }
+        }
+
+        0
+    }
+
+    pub fn handle_request(&mut self) -> isize {
+    // Skip setting Locy here, as CRB interface is being used
+        if self.cmd.is_some() {
+            if self.unix_tx_bufs() < 0 {
+                return -1
+            }
+            return 0
+        }
+        -1
+    }
+
+    pub fn worker_thread(&mut self) -> isize {
+        warn!("Worker Thread");
+        let err = self.handle_request();
+        if err < 0 {
+            // error_report_err(err);
+            return -1
+        }
+        //self.tpm_backend_request_completed();
+        0
+    }
+    pub fn deliver_request(&mut self, cmd: &TPMBackendCmd) -> (isize, Vec<u8>) {
+        debug!("tpm_emualtor: Deliver Request");
+        if self.cmd.is_none() {
+            self.cmd = Some(cmd.clone());
+            //self.cmd.replace(cmd.clone());
+
+            let ret = self.worker_thread();
+            let output = self.cmd.as_ref().unwrap().output.clone();
+            self.tpm_backend_request_completed();
+            return (ret, output)
+        }
+        (-1, vec![])
+    }
+
+    pub fn tpm_backend_request_completed(&mut self) {
+        self.cmd = None;
     }
 
     pub fn cancel_cmd(&mut self) -> Result<()> {
