@@ -175,3 +175,130 @@ impl Ptm for PtmEst {
 
     fn set_res(&mut self, res: u32) { self.tpm_result = res }
 }
+
+/* PTM_INIT */
+
+#[derive(Debug)]
+pub struct PtmInit {
+    pub mem: MemberType,
+    /* request */
+    pub init_flags: u32,
+    /* response */
+    pub tpm_result: PtmRes,
+}
+
+impl PtmInit {
+    pub fn new() -> Self {
+        Self {
+            mem: MemberType::Request,
+            init_flags: 0,
+            tpm_result: 0,
+        }
+    }
+}
+
+impl Ptm for PtmInit {
+    fn convert_to_reqbytes(&self) -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::<u8>::new();
+        buf.extend_from_slice(&self.init_flags.to_be_bytes());
+        buf
+    }
+
+    fn get_mem(&self) -> MemberType {self.mem}
+
+    fn convert_to_ptm(&mut self, buf: &[u8]) -> Result<()>{
+
+        if buf.len() < 4 {
+            return Err(TPMIocError::TPMConvertToPtm(anyhow!(
+                "PtmInit buffer is of insufficient length. Buffer length should be atleast 4"
+            )));
+        }
+        self.set_mem(MemberType::Response);
+        let mut res = &buf[0..4];
+        self.set_res(res.read_u32::<BigEndian>().unwrap());
+
+        Ok(())
+    }
+
+    fn set_mem(&mut self, mem:MemberType) { self.mem = mem }
+
+    fn set_res(&mut self, res: u32) { self.tpm_result = res }
+}
+
+/*
+ * PTM_SET_BUFFERSIZE: Set the buffer size to be used by the TPM.
+ * A 0 on input queries for the current buffer size. Any other
+ * number will try to set the buffer size. The returned number is
+ * the buffer size that will be used, which can be larger than the
+ * requested one, if it was below the minimum, or smaller than the
+ * requested one, if it was above the maximum.
+ */
+#[derive(Debug)]
+pub struct PtmSBSReq {
+    pub buffersize: u32,
+}
+
+#[derive(Debug)]
+pub struct PtmSBSResp {
+    pub bufsize: u32,
+    minsize: u32,
+    maxsize: u32,
+}
+
+#[derive(Debug)]
+pub struct PtmSetBufferSize{
+    pub mem: MemberType,
+    /* request */
+    pub req: PtmSBSReq,
+    /* response */
+    pub resp: PtmSBSResp,
+    pub tpm_result: PtmRes,
+}
+
+impl PtmSetBufferSize {
+    pub fn new() -> Self {
+        Self {
+            mem: MemberType::Request,
+            req: PtmSBSReq {buffersize:0},
+            resp: PtmSBSResp {bufsize:0,minsize:0,maxsize:0},
+            tpm_result: 0,
+        }
+    }
+}
+
+impl Ptm for PtmSetBufferSize {
+    fn convert_to_reqbytes(&self) -> Vec<u8> {
+        let mut buf: Vec<u8> = Vec::<u8>::new();
+        buf.extend_from_slice(&self.req.buffersize.to_be_bytes());
+        buf
+    }
+
+    fn get_mem(&self) -> MemberType {self.mem}
+
+    fn convert_to_ptm(&mut self, buf: &[u8]) ->  Result<()> {
+
+        if buf.len() < 16 {
+            return Err(TPMIocError::TPMConvertToPtm(anyhow!(
+                "PtmSetBufferSize buffer is of insufficient length. Buffer length should be atleast 16"
+            )));
+        }
+        self.set_mem(MemberType::Response);
+        let mut res = &buf[0..4];
+        self.set_res(res.read_u32::<BigEndian>().unwrap());
+
+        let mut bufsize = &buf[4..8];
+        self.resp.bufsize = bufsize.read_u32::<BigEndian>().unwrap();
+
+        let mut minsize = &buf[8..12];
+        self.resp.minsize = minsize.read_u32::<BigEndian>().unwrap();
+
+        let mut maxsize = &buf[12..16];
+        self.resp.maxsize = maxsize.read_u32::<BigEndian>().unwrap();
+
+        Ok(())
+    }
+
+    fn set_mem(&mut self, mem:MemberType) { self.mem = mem }
+
+    fn set_res(&mut self, res: u32) { self.tpm_result = res }
+}
