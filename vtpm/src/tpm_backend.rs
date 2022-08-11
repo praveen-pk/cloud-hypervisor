@@ -1,7 +1,7 @@
 extern crate nix;
 
 use crate::socket::SocketDev;
-use crate::tpm_ioctl::{Commands, MemberType, Ptm, PtmCap, PtmEst, PtmRes};
+use crate::tpm_ioctl::{Commands, MemberType, Ptm, PtmCap, PtmEst, PtmRes, PtmInit, PtmSetBufferSize};
 use anyhow::anyhow;
 use std::convert::TryInto;
 use std::mem;
@@ -369,4 +369,78 @@ impl TPMEmulator {
         Ok(())
     }
 
+    fn tpm_emulator_set_buffer_size(&mut self, wantedsize: usize, actualsize: &mut usize) ->  Result<()> {
+        let mut psbs: PtmSetBufferSize = PtmSetBufferSize::new();
+
+        self.tpm_emulator_stop_tpm()?;
+
+        psbs.req.buffersize = (wantedsize as u32).to_be();
+
+        self.tpm_emulator_ctrlcmd(Commands::CmdSetBufferSize, &mut psbs, mem::size_of::<u32>(), 4*mem::size_of::<u32>())?;
+
+        psbs.tpm_result = u32::from_be(psbs.tpm_result);
+        //TODO: Handle this error case
+        /*if psbs.tpm_result != 0 {
+            // error_report("tpm-emulator: TPM result for set buffer size : 0x%x %s",
+            //          psbs.u.resp.tpm_result,
+            //          tpm_emulator_strerror(psbs.u.resp.tpm_result));
+            warn!("Error Ptm res: {}", psbs.tpm_result);
+            return -1;
+        }*/
+
+        debug!("buffersize: {}", psbs.resp.bufsize);
+
+        *actualsize = psbs.resp.bufsize as usize;
+
+        Ok(())
+    }
+
+    pub fn tpm_emulator_startup_tpm(&mut self, buffersize: usize) -> Result<()>{
+        let mut init: PtmInit = PtmInit::new();
+
+        let mut actual_size: usize = 0;
+
+        //TODO: handle this error case
+        //buffersize != 0 &&
+        self.tpm_emulator_set_buffer_size(buffersize, &mut actual_size)?;
+
+        self.tpm_emulator_ctrlcmd(Commands::CmdInit, &mut init, mem::size_of::<u32>(), mem::size_of::<u32>())?;
+
+        //TODO: handle this error case
+        /*if init.tpm_result != 0 {
+            // error_report("tpm-emulator: TPM result for CMD_INIT: 0x%x %s", res,
+            //          tpm_emulator_strerror(res));
+            return -1
+        }*/
+
+        Ok(())
+    }
+
+    fn tpm_emulator_stop_tpm(&mut self) ->  Result<()> {
+        let mut res: PtmRes = 0;
+
+        self.tpm_emulator_ctrlcmd(Commands::CmdStop, &mut res, 0, mem::size_of::<u32>())?;
+
+        res = u32::from_be(res);
+
+        //TODO: Handle this error case
+        /*if res != 0 {
+            // error_report("tpm-emulator: TPM result for CMD_STOP: 0x%x %s", res,
+            //          tpm_emulator_strerror(res));
+            return -1;
+        }*/
+
+        Ok(())
+    }
+    pub fn get_buffer_size(&mut self) -> Result<usize> {
+        let mut actual_size: usize = 0;
+
+        match self.tpm_emulator_set_buffer_size(0, &mut actual_size){
+            Err(e) =>  {
+                return Ok(4906);
+            }
+            _ => {}
+        }
+        Ok(actual_size)
+    }
 }
