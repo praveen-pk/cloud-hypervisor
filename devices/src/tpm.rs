@@ -1,61 +1,21 @@
 use phf::{phf_map};
+use anyhow::anyhow;
+use thiserror::Error;
 use vtpm::tpm_backend::{TPMBackendCmd, TPMEmulator};
 use vm_device::BusDevice;
 use std::sync::{Arc, Barrier};
+use std::cmp;
 
 
-/*
-/* Define SHIFT, LENGTH and MASK constants for a field within a register */
 
-/* This macro will define R_FOO_BAR_MASK, R_FOO_BAR_SHIFT and R_FOO_BAR_LENGTH
- * constants for field BAR in register FOO.
- */
-#define FIELD(reg, field, shift, length)                                  \
-    enum { R_ ## reg ## _ ## field ## _SHIFT = (shift)};                  \
-    enum { R_ ## reg ## _ ## field ## _LENGTH = (length)};                \
-    enum { R_ ## reg ## _ ## field ## _MASK =                             \
-                                        MAKE_64BIT_MASK(shift, length)};
-
-/* This macro will define A_FOO, for the byte address of a register
- * as well as R_FOO for the uint32_t[] register number (A_FOO / 4).
- */
-#define REG32(reg, addr)                                                  \
-    enum { A_ ## reg = (addr) };                                          \
-    enum { R_ ## reg = (addr) / 4 };
-                                        */
-
-/* Extract a field from an array of registers
-#define ARRAY_FIELD_EX32(regs, reg, field)                                \
-FIELD_EX32((regs)[R_ ## reg], reg, field)
-#define ARRAY_FIELD_EX64(regs, reg, field)                                \
-FIELD_EX64((regs)[R_ ## reg], reg, field)
-
-#define FIELD_EX32(storage, reg, field)                                   \
-    extract32((storage), R_ ## reg ## _ ## field ## _SHIFT,               \
-              R_ ## reg ## _ ## field ## _LENGTH)
-#define FIELD_EX64(storage, reg, field)                                   \
-    extract64((storage), R_ ## reg ## _ ## field ## _SHIFT,               \
-              R_ ## reg ## _ ## field ## _LENGTH)
-
- * extract32:
- * @value: the value to extract the bit field from
- * @start: the lowest bit in the bit field (numbered from 0)
- * @length: the length of the bit field
- *
- * Extract from the 32 bit input @value the bit field specified by the
- * @start and @length parameters, and return it. The bit field must
- * lie entirely within the 32 bit word. It is valid to request that
- * all 32 bits are returned (ie @length 32 and @start 0).
- *
- * Returns: the value of the bit field extracted from the input value.
-
- static inline uint32_t extract32(uint32_t value, int start, int length)
-{
-    assert(start >= 0 && length > 0 && length <= 32 - start);
-    return (value >> start) & (~0U >> (32 - length));
+#[derive(Error, Debug)]
+pub enum TPMError {
+    #[error("TPM Emulator doesn't implement min required capabilities: {0}")]
+    TPMCheckCaps(#[source] anyhow::Error),
+    #[error("TPM Emulator doesn't implement min required capabilities: {0}")]
+    TPMInit(#[source] anyhow::Error),
 }
-
-*/
+type Result<T> = anyhow::Result<T, TPMError>;
 
 
 
@@ -114,10 +74,10 @@ const CRB_CTRL_START:u32 = 0x4C;
 const CRB_START_INVOKE:u32 = 1 << 0;
 const CRB_INT_ENABLED:u32 = 0x50;
 const CRB_INT_STS:u32 = 0x54;
-const CRB_CTRL_CMD_SIZE:u32 = 0x58;
+//const CRB_CTRL_CMD_SIZE:u32 = 0x58;
 const CRB_CTRL_CMD_LADDR:u32 = 0x5C;
 const CRB_CTRL_CMD_HADDR:u32 = 0x60;
-const CRB_CTRL_RSP_SIZE:u32 = 0x64;
+const CRB_CTRL_RSP_SIZE:usize = 0x64;
 const CRB_CTRL_RSP_ADDR:u32 = 0x68;
 const CRB_DATA_BUFFER:u32 = 0x80;
 
@@ -139,8 +99,9 @@ const CRB_INTF_CAP_XFER_SIZE_64:u32 = 0x0b11;
 const CRB_INTF_CAP_FIFO_NOT_SUPPORTED:u32 = 0x0b0;
 const CRB_INTF_CAP_CRB_SUPPORTED:u32 = 0x0b1;
 const CRB_INTF_IF_SELECTOR_CRB:u32 = 0x0b1;
+const PCI_VENDOR_ID_IBM:u32 = 0x1014;
 
-const CRB_CTRL_CMD_SIZE:u32 = (TPM_CRB_ADDR_SIZE - CRB_DATA_BUFFER);
+const CRB_CTRL_CMD_SIZE:usize = (TPM_CRB_ADDR_SIZE - CRB_DATA_BUFFER) as usize;
 
 
 fn get_fields_map(reg:u32) -> phf::Map<&'static str,[u32;2]> {
@@ -196,72 +157,80 @@ struct TPM {
 }
 
 impl TPM {
-    fn new(&mut self){
-
-    let tpm = TPM{
-            emulator:  TPMEmulator::new(),
+    fn new(&mut self, path: String) -> Result<Self> {
+    let tpm_emu =  TPMEmulator::new(path).map_err(|e| {
+        TPMError::TPMInit(anyhow!(
+            "Failed while initializing TPM Emulator: {:?}",
+            e
+        ))
+    })?;
+    let mut tpm = TPM{
+            emulator: tpm_emu,
             cmd: None,
-            regs: [0;TPM_CRB_R_MAX],
-            be_buffer_size: emulator.get_buffer_size(),
+            regs: [0;TPM_CRB_R_MAX as usize],
+            be_buffer_size: CRB_CTRL_CMD_SIZE,
             ppi_enabled: false
         };
         tpm.reset();
-        tpm
+        Ok(tpm)
     }
-    fn tpm_get_active_locty(&mut self){
-        return get_reg_field (self.regs, CRB_LOC_STATE, "locAssigned")
+    fn tpm_get_active_locty(&mut self) -> u32{
+        return get_reg_field (&self.regs, CRB_LOC_STATE, "locAssigned")
     }
     fn reset (&mut self) {
 
+        let curr_buff_size = self.emulator.get_buffer_size().unwrap();
     //TODO: Reset TPM Emulator here
     //        tpm_backend_reset(s->tpmbe);
-        self.regs = [0;TPM_CRB_R_MAX];
-        set_reg_field(self.regs, CRB_LOC_STATE, "tpmRegValidSts", 1);
-        set_reg_field(self.regs, CRB_CTRL_STS, "tpmIdle", 1);
-        set_reg_field(self.regs, CRB_INTF_ID, "InterfaceType", CRB_INTF_TYPE_CRB_ACTIVE);
-        set_reg_field(self.regs, CRB_INTF_ID,"InterfaceVersion", CRB_INTF_VERSION_CRB);
-        set_reg_field(self.regs, CRB_INTF_ID,"CapLocality", CRB_INTF_CAP_LOCALITY_0_ONLY);
-        set_reg_field(self.regs, CRB_INTF_ID, "CapCRBIdleBypass", CRB_INTF_CAP_IDLE_FAST);
-        set_reg_field(self.regs, CRB_INTF_ID, "CapDataXferSizeSupport", CRB_INTF_CAP_XFER_SIZE_64);
-        set_reg_field(self.regs, CRB_INTF_ID,"CapFIFO", CRB_INTF_CAP_FIFO_NOT_SUPPORTED);
-        set_reg_field(self.regs, CRB_INTF_ID, "CapCRB", CRB_INTF_CAP_CRB_SUPPORTED);
-        set_reg_filed(self.regs, CRB_INTF_ID,"InterfaceSelector", CRB_INTF_IF_SELECTOR_CRB);
-        set_reg_field(self.regs, CRB_INTF_ID, "RID", 0x0b0000);
-        set_reg_field(self.regs, CRB_INTF_ID2,"VID", PCI_VENDOR_ID_IBM);
+        self.regs = [0;TPM_CRB_R_MAX as usize];
+        set_reg_field(&mut self.regs, CRB_LOC_STATE, "tpmRegValidSts", 1);
+        set_reg_field(&mut self.regs, CRB_CTRL_STS, "tpmIdle", 1);
+        set_reg_field(&mut self.regs, CRB_INTF_ID, "InterfaceType", CRB_INTF_TYPE_CRB_ACTIVE);
+        set_reg_field(&mut self.regs, CRB_INTF_ID,"InterfaceVersion", CRB_INTF_VERSION_CRB);
+        set_reg_field(&mut self.regs, CRB_INTF_ID,"CapLocality", CRB_INTF_CAP_LOCALITY_0_ONLY);
+        set_reg_field(&mut self.regs, CRB_INTF_ID, "CapCRBIdleBypass", CRB_INTF_CAP_IDLE_FAST);
+        set_reg_field(&mut self.regs, CRB_INTF_ID, "CapDataXferSizeSupport", CRB_INTF_CAP_XFER_SIZE_64);
+        set_reg_field(&mut self.regs, CRB_INTF_ID,"CapFIFO", CRB_INTF_CAP_FIFO_NOT_SUPPORTED);
+        set_reg_field(&mut self.regs, CRB_INTF_ID, "CapCRB", CRB_INTF_CAP_CRB_SUPPORTED);
+        set_reg_field(&mut self.regs, CRB_INTF_ID,"InterfaceSelector", CRB_INTF_IF_SELECTOR_CRB);
+        set_reg_field(&mut self.regs, CRB_INTF_ID, "RID", 0x0b0000);
+        set_reg_field(&mut self.regs, CRB_INTF_ID2,"VID", PCI_VENDOR_ID_IBM);
 
-        self.regs[CRB_CTRL_CMD_SIZE] = CRB_CTRL_CMD_SIZE;
-        self.regs[CRB_CTRL_CMD_LADDR] = TPM_CRB_ADDR_BASE + A_CRB_DATA_BUFFER;
-        self.regs[R_CRB_CTRL_RSP_SIZE] = CRB_CTRL_CMD_SIZE;
-        self.regs[R_CRB_CTRL_RSP_ADDR] = TPM_CRB_ADDR_BASE + A_CRB_DATA_BUFFER;
+        self.regs[CRB_CTRL_CMD_SIZE] = CRB_CTRL_CMD_SIZE as u32;
+        self.regs[CRB_CTRL_CMD_LADDR as usize] = TPM_CRB_ADDR_BASE + CRB_DATA_BUFFER;
+        self.regs[CRB_CTRL_RSP_SIZE] = CRB_CTRL_CMD_SIZE as u32;
+        self.regs[CRB_CTRL_RSP_ADDR as usize] = TPM_CRB_ADDR_BASE + CRB_DATA_BUFFER;
 
-        self.be_buffer_size = MIN(self.emulator.get_buffer_size(),
-                                CRB_CTRL_CMD_SIZE);
+        self.be_buffer_size = cmp::min(curr_buff_size, CRB_CTRL_CMD_SIZE);
 
-        self.emulator.tpm_emulator_startup_tpm();
+        self.emulator.tpm_emulator_startup_tpm(self.be_buffer_size);
     }
 }
 
 //impl BusDevice for TPM
 impl BusDevice for TPM {
+
     fn read(&mut self, base: u64, offset: u64, data: &mut [u8]){
 
         let addr:u64 = base + offset;
         //Byte addessable register address
-        let addr_u8:u8 = addr.to_be_bytes()[0];
-        let loc_u8:u8 = CRB_LOC_STATE.to_be_bytes()[0];
+       // let addr_u8:u8 = addr.to_be_bytes()[0];
+        //let loc_u8:u8 = CRB_LOC_STATE.to_be_bytes()[0];
+        let offset:u32 = offset as u32 & 0xff;
         //32-bit register address
         let reg:u32 = addr as u32 & !3;
         let mut avail: u32;
         let mut size = data.len();
         let mut val = self.regs[offset as usize];
 
-        match addr_u8 {
-             loc_u8 => {
+        match offset {
+            CRB_LOC_STATE => {
                 if !self.emulator.get_tpm_established_flag() {
                     val = val | 0x1;
                 }
-            }
-        }
+            },
+            _ => {}
+        };
         if data.len() <= 4 {
             for (byte, read) in data.iter_mut().zip(<u32>::to_le_bytes(val).iter().cloned()) {
                 *byte = read as u8;
@@ -277,12 +246,14 @@ impl BusDevice for TPM {
         }
 
     }
+
     fn write(&mut self, base: u64, offset: u64, data: &[u8]) -> Option<Arc<Barrier>> {
         let addr: u64 = base + offset;
         let offset:u32 = offset as u32 & 0xff;
-        let locty = tpm_locality_from_addr(addr);
+        let locty = tpm_locality_from_addr(addr) as u32;
         let size = data.len();
 
+        // This is from TPM TIS
         // TODO: Confirm if this applies to CRB interface as well
         if size > 4 {
             warn!(
@@ -328,19 +299,40 @@ impl BusDevice for TPM {
                         self.emulator.cancel_cmd();
                     }
                 return None;
-            }
+            },
+            CRB_CTRL_START =>{
+                let cmd = self.cmd.as_ref().unwrap().clone();
+                if (v == CRB_START_INVOKE &&
+                    (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE == 0) &&
+                    self.tpm_get_active_locty() == locty) {
+                   // void *mem = memory_region_get_ram_ptr(&s->cmdmem);
+
+                    self.regs[CRB_CTRL_START as usize] |= CRB_START_INVOKE;
+                    self.cmd = Some(TPMBackendCmd{
+                        locty: locty as u8,
+                        input: data.to_vec().clone(),
+                        input_len: cmp::min(size as u32,CRB_CTRL_CMD_SIZE as u32),
+                        output: vec![0;CRB_CTRL_CMD_SIZE as usize],   // initialize zeroed vector with full length. len is used while reading output with recvfrom
+                        output_len: CRB_CTRL_CMD_SIZE as isize,
+                        selftest_done: false,
+                    });
+                    self.emulator.deliver_request(&cmd);
+                }
+                return None
+            },
             _ => {
-                error!("Write at Invalid TPM Offset: {:?}", offset);
-                return None;
+                    error!("Invalid Offset: {:?} during write to TPM", offset);
+                    return None
             }
         }
+
 
     }
 }
 
 
 
-mod tests {
+pub(crate) mod tests {
     use super::*;
 
     #[test]
