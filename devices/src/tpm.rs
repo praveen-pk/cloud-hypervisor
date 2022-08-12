@@ -33,6 +33,10 @@ const CRB_LOC_STATE_FIELDS:phf::Map<&str,[u32;2]> = phf_map! {
     "tpmRegValidSts" => [7, 1]
 };
 const CRB_LOC_CTRL:u32 = 0x08;
+const CRB_LOC_CTRL_REQUEST_ACCESS:u32 = 1<<0;
+const CRB_LOC_CTRL_RELINQUISH:u32 = 1<<1;
+const CRB_LOC_CTRL_SEIZE:u32 = 1<<2;
+const CRB_LOC_CTRL_RESET_ESTABLISHMENT_BIT:u32 = 1<<3;
 const CRB_LOC_STS: u32 = 0x0C;
 const CRB_LOC_STS_fields:phf::Map<&str,[u32;2]> = phf_map! {
     "Granted" => [0, 1],
@@ -298,7 +302,6 @@ impl BusDevice for TPM {
                     (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE != 0) {
                         self.emulator.cancel_cmd();
                     }
-                return None;
             },
             CRB_CTRL_START =>{
                 let cmd = self.cmd.as_ref().unwrap().clone();
@@ -318,14 +321,30 @@ impl BusDevice for TPM {
                     });
                     self.emulator.deliver_request(&cmd);
                 }
-                return None
+            },
+            CRB_LOC_CTRL => {
+                match v {
+                    CRB_LOC_CTRL_RESET_ESTABLISHMENT_BIT => {
+                        return None;
+                    },
+                    CRB_LOC_CTRL_RELINQUISH => {
+                        set_reg_field(&mut self.regs, CRB_LOC_STATE, "locAssigned", 0);
+                        set_reg_field(&mut self.regs, CRB_LOC_STATE, "Granted", 0);
+                    },
+                    CRB_LOC_CTRL_REQUEST_ACCESS => {
+                        set_reg_field(&mut self.regs, CRB_LOC_STATE, "Granted", 1);
+                        set_reg_field(&mut self.regs, CRB_LOC_STATE, "beenSeized", 0);
+                        set_reg_field(&mut self.regs, CRB_LOC_STATE, "locAssigned", 1);
+                    }
+                    _ => {}
+                }
+
             },
             _ => {
                     error!("Invalid Offset: {:?} during write to TPM", offset);
-                    return None
             }
         }
-
+        return None
 
     }
 }
