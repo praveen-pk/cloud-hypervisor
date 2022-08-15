@@ -152,7 +152,7 @@ fn tpm_locality_from_addr(addr: u64) -> u8 {
 
 
 
-struct TPM {
+pub struct TPM {
     emulator: TPMEmulator,
     cmd: Option<TPMBackendCmd>,
     regs: [u32;TPM_CRB_R_MAX as usize],
@@ -161,7 +161,7 @@ struct TPM {
 }
 
 impl TPM {
-    fn new(&mut self, path: String) -> Result<Self> {
+    pub  fn new(path: String) -> Result<Self> {
     let tpm_emu =  TPMEmulator::new(path).map_err(|e| {
         TPMError::TPMInit(anyhow!(
             "Failed while initializing TPM Emulator: {:?}",
