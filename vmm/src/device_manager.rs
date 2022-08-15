@@ -175,6 +175,9 @@ pub enum DeviceManagerError {
     /// Cannot create virtio-vsock device
     CreateVirtioVsock(io::Error),
 
+    /// Cannot create vtpm device
+    CreateVtpmDevice(anyhow::Error),
+
     /// Failed to convert Path to &str for the vDPA device.
     CreateVdpaConvertPath,
 
@@ -1193,6 +1196,11 @@ impl DeviceManager {
             console_resize_pipe,
         )?;
 
+        let vtpm = self.add_vtpm_device(
+            &legacy_interrupt_manager
+        )?;
+        self.bus_devices.push(Arc::clone(&vtpm) as Arc<Mutex<dyn BusDevice>>);
+
         self.legacy_interrupt_manager = Some(legacy_interrupt_manager);
 
         virtio_devices.append(&mut self.make_virtio_devices()?);
@@ -2014,6 +2022,49 @@ impl DeviceManager {
             self.add_virtio_console_device(virtio_devices, console_pty, console_resize_pipe)?;
 
         Ok(Arc::new(Console { console_resizer }))
+    }
+
+    fn add_vtpm_device(
+        &mut self,
+        interrupt_manager: &Arc<dyn InterruptManager<GroupConfig = LegacyIrqGroupConfig>>,
+    ) -> DeviceManagerResult<Arc<Mutex<devices::tpm::TPM>>> {
+
+        /*let irq_num = self
+            .address_manager
+            .allocator
+            .lock()
+            .unwrap()
+            .allocate_irq()
+            .unwrap();
+
+        let interrupt_group = interrupt_manager
+            .create_group(LegacyIrqGroupConfig {
+                irq: irq_num as InterruptIndex,
+            })
+            .map_err(DeviceManagerError::CreateInterruptGroup)?;*/
+
+        // Must Create VTPM Device...
+        let vtpm =devices::tpm::TPM::new(
+            "/tmp/swtpm/swtpm-sock".to_string()
+        ).map_err(|e| DeviceManagerError::CreateVtpmDevice(anyhow!("Failed to create vTPM Device : {:?}", e)))?;
+        let vtpm = Arc::new(Mutex::new(vtpm));
+
+        // Add VTPM Device to mmio
+        self.address_manager
+            .mmio_bus
+            .insert(vtpm.clone(), arch::layout::VTPM_START.0, arch::layout::VTPM_SIZE)
+            .map_err(DeviceManagerError::BusError)?;
+
+        // Only for aarch64
+        /*self.id_to_dev_info.insert(
+                (DeviceType::Tpm, "tpm".to_string()),
+                MmioDeviceInfo {
+                    addr: arch::layout::VTPM_START.0,
+                    len: arch::layout::VTPM_SIZE,
+                    irq: irq_num as InterruptIndex,
+                },
+            );*/
+        Ok(vtpm)
     }
 
     fn make_virtio_devices(&mut self) -> DeviceManagerResult<Vec<MetaVirtioDevice>> {
