@@ -265,7 +265,7 @@ fn create_tpm2_table() -> Sdt {
 
     tpm.write(36, 0 as u16); //Platform Class
     tpm.write(38, 0 as u16); // Reserved Space
-    tpm.write(40, 4275306496 as u64); // Address of Control Area
+    tpm.write(40, 0xfed4_0000 as u64); // Address of Control Area
     tpm.write(48, 6 as u32); //Start Method
 
     tpm.update_checksum();
