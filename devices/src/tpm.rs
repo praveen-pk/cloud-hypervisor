@@ -104,7 +104,7 @@ const CRB_INTF_CAP_FIFO_NOT_SUPPORTED:u32 = 0x0b0;
 const CRB_INTF_CAP_CRB_SUPPORTED:u32 = 0x0b1;
 const CRB_INTF_IF_SELECTOR_CRB:u32 = 0x0b1;
 const PCI_VENDOR_ID_IBM:u32 = 0x1014;
-
+const CRB_CTRL_CMD_SIZE_REG:u32 = 0x58;
 const CRB_CTRL_CMD_SIZE:usize = (TPM_CRB_ADDR_SIZE - CRB_DATA_BUFFER) as usize;
 
 
@@ -200,7 +200,7 @@ impl TPM {
         set_reg_field(&mut self.regs, CRB_INTF_ID, "RID", 0x0b0000);
         set_reg_field(&mut self.regs, CRB_INTF_ID2,"VID", PCI_VENDOR_ID_IBM);
 
-        self.regs[CRB_CTRL_CMD_SIZE] = CRB_CTRL_CMD_SIZE as u32;
+        self.regs[CRB_CTRL_CMD_SIZE_REG as usize] = CRB_CTRL_CMD_SIZE as u32;
         self.regs[CRB_CTRL_CMD_LADDR as usize] = TPM_CRB_ADDR_BASE + CRB_DATA_BUFFER;
         self.regs[CRB_CTRL_RSP_SIZE] = CRB_CTRL_CMD_SIZE as u32;
         self.regs[CRB_CTRL_RSP_ADDR as usize] = TPM_CRB_ADDR_BASE + CRB_DATA_BUFFER;
