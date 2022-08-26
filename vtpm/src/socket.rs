@@ -149,13 +149,15 @@ impl SocketDev {
                         let ret = self.send_full(buf, len)?;
                         // swtpm will receive data Fd after a successful send
                         // reset cached write_msgfd after a successful send
-                        self.write_msgfd = 0;
+                        if ret >= 0{
+                            self.write_msgfd = 0;
+                        }
                         ret
                     },
                     _ => return Err(TPMSocError::WriteTPMSocket(anyhow!(
                         "TPM Socket was not in Connected State"))),
             };
-            debug!("write succeeded");
+            warn!("send_full write succeeded");
 
             Ok(res)
         } else {
