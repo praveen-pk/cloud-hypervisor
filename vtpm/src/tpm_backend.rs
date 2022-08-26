@@ -334,7 +334,7 @@ impl TPMEmulator {
             // error_report_err(err);
             return -1
         }
-        //self.tpm_backend_request_completed();
+        self.tpm_backend_request_completed();
         0
     }
     pub fn deliver_request(&mut self, cmd: &TPMBackendCmd) -> (isize, Vec<u8>) {
