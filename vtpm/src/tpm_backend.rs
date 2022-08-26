@@ -360,7 +360,7 @@ impl TPMEmulator {
 
         // If Emulator implements all caps
         if !((self.caps & (1 << 5)) == ((1 << 5))) {
-            return Err(TPMEmuError::TPMCheckCaps(anyhow!(
+                return Err(TPMEmuError::TPMCheckCaps(anyhow!(
                 "Emulator does not implement Capabilities to Cancel Commands"
             )));
         }
@@ -380,13 +380,10 @@ impl TPMEmulator {
 
         psbs.tpm_result = u32::from_be(psbs.tpm_result);
         //TODO: Handle this error case
-        /*if psbs.tpm_result != 0 {
-            // error_report("tpm-emulator: TPM result for set buffer size : 0x%x %s",
-            //          psbs.u.resp.tpm_result,
-            //          tpm_emulator_strerror(psbs.u.resp.tpm_result));
-            warn!("Error Ptm res: {}", psbs.tpm_result);
-            return -1;
-        }*/
+        if psbs.tpm_result != 0 {
+               error!("tpm-emulator: TPM result for set buffer size : 0x{:?}",
+                               psbs.tpm_result);
+        }
 
         debug!("buffersize: {}", psbs.resp.bufsize);
 
