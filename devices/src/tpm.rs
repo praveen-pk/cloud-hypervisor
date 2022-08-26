@@ -158,6 +158,7 @@ pub struct TPM {
     regs: [u32;TPM_CRB_R_MAX as usize],
     be_buffer_size: usize,
     ppi_enabled: bool,
+    data_buff: [u8;CRB_CTRL_CMD_SIZE as usize]
 }
 
 impl TPM {
@@ -173,7 +174,8 @@ impl TPM {
             cmd: None,
             regs: [0;TPM_CRB_R_MAX as usize],
             be_buffer_size: CRB_CTRL_CMD_SIZE,
-            ppi_enabled: false
+            ppi_enabled: false,
+            data_buff: [0;CRB_CTRL_CMD_SIZE as usize]
         };
         tpm.reset();
         Ok(tpm)
@@ -229,28 +231,44 @@ impl BusDevice for TPM {
         let reg:u32 = addr as u32 & !3;
         let mut avail: u32;
         let mut size = data.len();
-        let mut val = self.regs[offset as usize];
+        if offset >= CRB_DATA_BUFFER && offset <=CRB_DATA_BUFFER + (CRB_CTRL_CMD_SIZE as u32) {
+            // return values from Data Buffer
+            //TODO: Check data.len() is < 4
+            let start:usize = (offset as usize) - (CRB_DATA_BUFFER as usize);
+            let end:usize = start + data.len();
+            let len = data.len();
+            data[0..len].clone_from_slice(&self.data_buff[start..end]);
 
-        match offset {
-            CRB_LOC_STATE => {
-                if !self.emulator.get_tpm_established_flag() {
-                    val = val | 0x1;
+        }
+        else {
+            let mut val = self.regs[offset as usize];
+
+            match offset {
+                CRB_LOC_STATE => {
+                    if !self.emulator.get_tpm_established_flag() {
+                        val = val | 0x1;
+                    }
+                },
+                _ => {}
+            };
+            if data.len() <= 4 {
+                for (byte, read) in data.iter_mut().zip(<u32>::to_le_bytes(val).iter().cloned()) {
+                    *byte = read as u8;
                 }
-            },
-            _ => {}
-        };
-        if data.len() <= 4 {
-            for (byte, read) in data.iter_mut().zip(<u32>::to_le_bytes(val).iter().cloned()) {
-                *byte = read as u8;
-            }
-            debug!("mmio.read completed: offset: {:#X}, data: {:?}, val = {:#X}", offset, data, val);
+                debug!("mmio.read completed: offset: {:#X}, data: {:?}, val = {:#X}", offset, data, val);
 
-        } else {
-            warn!(
-                "Invalid TPM read: offset {}, data length {}",
-                offset,
-                data.len()
-            );
+            } else {
+                warn!(
+                    "Invalid TPM read: offset {}, data length {}",
+                    offset,
+                    data.len()
+                );
+            }
+        }
+        warn!("TPM MMIO Read: base {:#X} offset {:#X} len {:?}  ", base, offset, data.len());
+
+        for i in 0..data.len(){
+            warn!("data at offset {:?} = {:#X}",i,data[i]);
         }
 
     }
@@ -308,7 +326,7 @@ impl BusDevice for TPM {
                     }
             },
             CRB_CTRL_START =>{
-                let cmd = self.cmd.as_ref().unwrap().clone();
+
                 if (v == CRB_START_INVOKE &&
                     (self.regs[CRB_CTRL_START as usize] & CRB_START_INVOKE == 0) &&
                     self.tpm_get_active_locty() == locty) {
@@ -317,13 +335,16 @@ impl BusDevice for TPM {
                     self.regs[CRB_CTRL_START as usize] |= CRB_START_INVOKE;
                     self.cmd = Some(TPMBackendCmd{
                         locty: locty as u8,
-                        input: data.to_vec().clone(),
+                        input: self.data_buff.to_vec(),
                         input_len: cmp::min(size as u32,CRB_CTRL_CMD_SIZE as u32),
-                        output: vec![0;CRB_CTRL_CMD_SIZE as usize],   // initialize zeroed vector with full length. len is used while reading output with recvfrom
+                        output: self.data_buff.to_vec(),   // initialize zeroed vector with full length. len is used while reading output with recvfrom
                         output_len: CRB_CTRL_CMD_SIZE as isize,
                         selftest_done: false,
                     });
+                    let cmd = self.cmd.as_ref().unwrap().clone();
                     self.emulator.deliver_request(&cmd);
+                    warn!("data_buff returnd after CTRL_START = {:?}",self.data_buff);
+
                 }
             },
             CRB_LOC_CTRL => {
@@ -345,7 +366,16 @@ impl BusDevice for TPM {
 
             },
             _ => {
-                    error!("Invalid Offset: {:?} during write to TPM", offset);
+                if offset < CRB_DATA_BUFFER  || offset >= (CRB_DATA_BUFFER + (CRB_CTRL_CMD_SIZE as u32))  {
+                    error!("Invalid Offset: {:#X} during write to TPM", offset);
+                    return None;
+                }
+                //TODO: Like Qemu, assign a subregion of memory and handle writes directly
+                //Store the data to a local object and pass it to start when needed
+                let start:usize = (offset as usize) - (CRB_DATA_BUFFER as usize);
+                let end:usize = start + data.len();
+                self.data_buff[start..end].clone_from_slice(data);
+                warn!("Data Buffer after write {:?}",self.data_buff);
             }
         }
         return None
