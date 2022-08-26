@@ -179,7 +179,11 @@ impl TPM {
         Ok(tpm)
     }
     fn tpm_get_active_locty(&mut self) -> u32{
-        return get_reg_field (&self.regs, CRB_LOC_STATE, "locAssigned")
+        if get_reg_field(&self.regs, CRB_LOC_STATE, "locAssigned") == 0 {
+            return TPM_CRB_NO_LOCALITY;
+        }
+        let locty =  get_reg_field (&self.regs, CRB_LOC_STATE, "activeLocality");
+        return locty;
     }
     fn reset (&mut self) {
 
