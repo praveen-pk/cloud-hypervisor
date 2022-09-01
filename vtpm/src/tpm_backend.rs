@@ -3,6 +3,7 @@ extern crate nix;
 use crate::socket::SocketDev;
 use crate::tpm_ioctl::{Commands, MemberType, Ptm, PtmCap, PtmEst, PtmRes, PtmInit, PtmSetBufferSize};
 use anyhow::anyhow;
+use libc::input_absinfo;
 use std::convert::TryInto;
 use std::mem;
 use std::os::unix::io::RawFd;
@@ -47,12 +48,15 @@ const PTM_CAP_SET_BUFFERSIZE: u64 = 1 << 13;
 ///Check if the input command is selftest
 ///
 pub fn tpm_util_is_selftest(input: Vec<u8>, in_len: u32) -> bool {
+    warn!("PPK: Input cmd is selftest, input = {:?} len = {:?}",input, in_len );
     if in_len >= TPM_REQ_HDR_SIZE {
         let ord: &[u8; 4] = input[6..6 + 4]
             .try_into()
             .expect("tpm_util_is_selftest: slice with incorrect length");
+            warn!("PPK:tpm_util_is_selftest cmp {:#X} ",u32::from_ne_bytes(*ord).to_be() );
         return u32::from_ne_bytes(*ord).to_be() == 0x53;
     }
+    warn!("PPK: tpm_util_is_selftest return FALSE");
     false
 }
 #[derive(Error, Debug)]
@@ -165,11 +169,10 @@ impl TPMEmulator {
                 e
             ))
         })?;
-
         self.ctrl_soc.set_msgfd(fd2);
-
+        debug!("msg/data fd configured in swtpm = {:?}", fd2);
         self.tpm_emulator_ctrlcmd(Commands::CmdSetDatafd, &mut res, 0, mem::size_of::<u32>())?;
-
+        debug!("data fd in cloud-hypervisor = {:?}", fd1);
         self.data_ioc = fd1;
         self.ctrl_soc.set_datafd(fd1);
 
@@ -232,10 +235,12 @@ impl TPMEmulator {
                 .ctrl_soc
                 .read(&mut output)
                 .map_err(|e| TPMEmuError::RunTPMCtrlCmd(e.into()))?;
+
             msg.convert_to_ptm(&output);
         } else {
             msg.set_mem(MemberType::Response);
         }
+        debug!("TPM Ctrl Cmd output : {:?}", output);
         Ok(())
     }
 
@@ -295,8 +300,9 @@ impl TPMEmulator {
                 cmd.selftest_done = false;
                 let input = &cmd.input;
                 is_selftest = tpm_util_is_selftest((input).to_vec(), cmd.input_len);
-            }
 
+            }
+            warn!("PPK: Send cmd to data_ioc : {:?} input = {:?}",self.data_ioc, cmd.input);
             //qio_channel_write_all
             let iov = &[IoVec::from_slice(cmd.input.as_slice())];
             let ret = sendmsg(self.data_ioc, iov, &[], MsgFlags::empty(), None).expect("char.rs: ERROR ON send_full sendmsg") as isize;
@@ -306,12 +312,18 @@ impl TPMEmulator {
 
             //qio_channel_read_all
             let (size, sock) = recvfrom(self.data_ioc, &mut cmd.output).expect("unix_tx_bufs: sync_read recvmsg error");
+            warn!("PPK: output after unix_tx_bufs  = {:?} selftest = {:?}", cmd.output, is_selftest);
 
             if is_selftest {
                 let errcode: &[u8; 4] = cmd.output[6..6+4].try_into().expect("tpm_util_is_selftest: slice with incorrect length");
                 cmd.selftest_done = u32::from_ne_bytes(*errcode).to_be() == 0;
             }
+            //self.cmd.as_ref().unwrap().output.copy_from_slice(cmd.output.as_slice());
+            //self.cmd.as_ref().unwrap().output = &[IoVec::from_slice(cmd.output.as_slice())];
+
         }
+        warn!("PPK: output after unix_tx_bufs  = {:?}", self.cmd.as_ref().unwrap().output);
+
 
         0
     }
@@ -319,7 +331,10 @@ impl TPMEmulator {
     pub fn handle_request(&mut self) -> isize {
     // Skip setting Locy here, as CRB interface is being used
         if self.cmd.is_some() {
+            warn!("Handle Request");
             if self.unix_tx_bufs() < 0 {
+                warn!("PPK: output after handle_request  = {:?}", self.cmd.as_ref().unwrap().output);
+
                 return -1
             }
             return 0
@@ -334,21 +349,25 @@ impl TPMEmulator {
             // error_report_err(err);
             return -1
         }
-        self.tpm_backend_request_completed();
+        warn!("PPK: output after worker_thread  = {:?}", self.cmd.as_ref().unwrap().output);
+        //self.tpm_backend_request_completed();
         0
     }
-    pub fn deliver_request(&mut self, cmd: &TPMBackendCmd) -> (isize, Vec<u8>) {
-        debug!("tpm_emualtor: Deliver Request");
+
+    pub fn deliver_request(&mut self, cmd: &mut TPMBackendCmd) -> (isize, Vec<u8>) {
+        warn!("tpm_emualtor: Deliver Request");
         if self.cmd.is_none() {
             self.cmd = Some(cmd.clone());
-            //self.cmd.replace(cmd.clone());
 
             let ret = self.worker_thread();
             let output = self.cmd.as_ref().unwrap().output.clone();
+
             self.tpm_backend_request_completed();
-            return (ret, output)
+            warn!("tpm_emualtor: Deliver Request, returns :: {:?}",ret);
+            return (ret,output)
         }
-        (-1, vec![])
+        warn!("tpm_emualtor: Deliver Request, returns -1");
+        (-1,vec![])
     }
 
     pub fn tpm_backend_request_completed(&mut self) {
@@ -360,7 +379,7 @@ impl TPMEmulator {
 
         // If Emulator implements all caps
         if !((self.caps & (1 << 5)) == ((1 << 5))) {
-                return Err(TPMEmuError::TPMCheckCaps(anyhow!(
+            return Err(TPMEmuError::TPMCheckCaps(anyhow!(
                 "Emulator does not implement Capabilities to Cancel Commands"
             )));
         }
@@ -373,6 +392,7 @@ impl TPMEmulator {
         let mut psbs: PtmSetBufferSize = PtmSetBufferSize::new();
 
         self.tpm_emulator_stop_tpm()?;
+        warn!("PPK wanted tpm_emulator_set_buffer_size: {:?}", wantedsize);
 
         psbs.req.buffersize = (wantedsize as u32).to_be();
 
@@ -381,12 +401,11 @@ impl TPMEmulator {
         psbs.tpm_result = u32::from_be(psbs.tpm_result);
         //TODO: Handle this error case
         if psbs.tpm_result != 0 {
-               error!("tpm-emulator: TPM result for set buffer size : 0x{:?}",
-                               psbs.tpm_result);
+             error!("tpm-emulator: TPM result for set buffer size : 0x{:?}",
+                      psbs.tpm_result);
         }
 
-        debug!("buffersize: {}", psbs.resp.bufsize);
-
+        warn!("PPK set tpm_emulator_set_buffer_size: {:?}", psbs.resp.bufsize);
         *actualsize = psbs.resp.bufsize as usize;
 
         Ok(())
@@ -400,7 +419,7 @@ impl TPMEmulator {
         //TODO: handle this error case
         //buffersize != 0 &&
         self.tpm_emulator_set_buffer_size(buffersize, &mut actual_size)?;
-
+        warn!("PPK: set tpm buffer_size to {:?}", buffersize);
         self.tpm_emulator_ctrlcmd(Commands::CmdInit, &mut init, mem::size_of::<u32>(), mem::size_of::<u32>())?;
 
         //TODO: handle this error case
