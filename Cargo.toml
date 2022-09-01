@@ -1,8 +1,8 @@
 [package]
 name = "cloud-hypervisor"
-version = "22.0.0"
+version = "26.0.0"
 authors = ["The Cloud Hypervisor Authors"]
-edition = "2018"
+edition = "2021"
 default-run = "cloud-hypervisor"
 build = "build.rs"
 license = "LICENSE-APACHE & LICENSE-BSD-3-Clause"
@@ -10,31 +10,31 @@ description = "Open source Virtual Machine Monitor (VMM) that runs on top of KVM
 homepage = "https://github.com/cloud-hypervisor/cloud-hypervisor"
 # Minimum buildable version:
 # Keep in sync with version in .github/workflows/build.yaml
-rust-version = "1.54"
+rust-version = "1.60"
 
 [profile.release]
 lto = true
 
 [dependencies]
-anyhow = "1.0.56"
+anyhow = "1.0.63"
 api_client = { path = "api_client" }
-clap = { version = "3.1.6", features = ["wrap_help","cargo"] }
+clap = { version = "3.2.19", features = ["wrap_help","cargo"] }
 epoll = "4.3.1"
 event_monitor = { path = "event_monitor" }
 hypervisor = { path = "hypervisor" }
-libc = "0.2.121"
-log = { version = "0.4.16", features = ["std"] }
+libc = "0.2.132"
+log = { version = "0.4.17", features = ["std"] }
 option_parser = { path = "option_parser" }
 seccompiler = "0.2.0"
-serde_json = "1.0.79"
-signal-hook = "0.3.13"
-thiserror = "1.0.30"
+serde_json = "1.0.85"
+signal-hook = "0.3.14"
+thiserror = "1.0.33"
 vmm = { path = "vmm" }
-vmm-sys-util = "0.9.0"
-vm-memory = "0.7.0"
+vmm-sys-util = "0.10.0"
+vm-memory = "0.9.0"
 
 [build-dependencies]
-clap = { version = "3.1.6", features = ["wrap_help"] }
+clap = { version = "3.2.19", features = ["cargo"] }
 
 # List of patched crates
 [patch.crates-io]
@@ -44,9 +44,9 @@ versionize_derive = { git = "https://github.com/cloud-hypervisor/versionize_deri
 
 [dev-dependencies]
 dirs = "4.0.0"
-lazy_static= "1.4.0"
 net_util = { path = "net_util" }
-serde_json = "1.0.79"
+once_cell = "1.13.1"
+serde_json = "1.0.85"
 test_infra = { path = "test_infra" }
 wait-timeout = "0.2.0"
 
@@ -58,6 +58,7 @@ amx = ["vmm/amx"]
 cmos = ["vmm/cmos"]
 fwdebug = ["vmm/fwdebug"]
 gdb = ["vmm/gdb"]
+guest_debug = ["vmm/guest_debug"]
 kvm = ["vmm/kvm"]
 mshv = ["vmm/mshv"]
 tdx = ["vmm/tdx"]
@@ -78,6 +79,7 @@ members = [
     "performance-metrics",
     "qcow",
     "rate_limiter",
+    "serial_buffer",
     "test_infra",
     "vfio_user",
     "vhdx",
