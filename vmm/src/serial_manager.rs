@@ -14,12 +14,15 @@ use serial_buffer::SerialBuffer;
 use std::fs::File;
 use std::io::Read;
 use std::os::unix::io::{AsRawFd, FromRawFd};
+use std::os::unix::net::UnixListener;
 use std::panic::AssertUnwindSafe;
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 use std::{io, result, thread};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
+use std::os::fd::IntoRawFd;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -54,6 +57,14 @@ pub enum Error {
     /// Cannot spawn SerialManager thread.
     #[error("Error spawning SerialManager thread: {0}")]
     SpawnSerialManager(#[source] io::Error),
+
+    /// Cannot bind to Unix Socket
+    #[error("Error binding to socket: {0}")]
+    BindUnixSocket(#[source] io::Error),
+
+    /// Cannot accpet connection from Unix Socket
+    #[error("Error accepting connection: {0}")]
+    AcceptConnection(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -86,6 +97,7 @@ pub struct SerialManager {
     kill_evt: EventFd,
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
+    mode: ConsoleOutputMode,
 }
 
 impl SerialManager {
@@ -94,6 +106,7 @@ impl SerialManager {
         #[cfg(target_arch = "aarch64")] serial: Arc<Mutex<Pl011>>,
         pty_pair: Option<Arc<Mutex<PtyPair>>>,
         mode: ConsoleOutputMode,
+        unix_socket: Option<PathBuf>
     ) -> Result<Option<Self>> {
         let in_file = match mode {
             ConsoleOutputMode::Pty => {
@@ -130,6 +143,16 @@ impl SerialManager {
                     return Ok(None);
                 }
             }
+            ConsoleOutputMode::Unix => {
+                if let Some(sock_path) = unix_socket {
+                    let listener = UnixListener::bind(sock_path.as_path()).map_err(Error::BindUnixSocket)?;
+                    //PPK: Check this
+                    //listener.set_nonblocking(true).map_err(Error::EventFd)?;
+                    unsafe{File::from_raw_fd(listener.into_raw_fd())}
+                } else {
+                    return Ok(None)
+                }
+            }
             _ => return Ok(None),
         };
 
@@ -144,14 +167,23 @@ impl SerialManager {
         )
         .map_err(Error::Epoll)?;
 
-        epoll::ctl(
-            epoll_fd,
-            epoll::ControlOptions::EPOLL_CTL_ADD,
-            in_file.as_raw_fd(),
-            epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
-        )
-        .map_err(Error::Epoll)?;
-
+        if mode == ConsoleOutputMode::Unix {
+            epoll::ctl(
+                epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                in_file.as_raw_fd(),
+                epoll::Event::new(epoll::Events::EPOLLIN, in_file.as_raw_fd() as u64),
+            )
+            .map_err(Error::Epoll)?;
+        }else {
+            epoll::ctl(
+                epoll_fd,
+                epoll::ControlOptions::EPOLL_CTL_ADD,
+                in_file.as_raw_fd(),
+                epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
+            )
+            .map_err(Error::Epoll)?;
+        }
         let mut pty_write_out = None;
         if mode == ConsoleOutputMode::Pty {
             let write_out = Arc::new(AtomicBool::new(false));
@@ -172,6 +204,7 @@ impl SerialManager {
             kill_evt,
             handle: None,
             pty_write_out,
+            mode
         }))
     }
 
@@ -212,6 +245,10 @@ impl SerialManager {
         let mut in_file = self.in_file.try_clone().map_err(Error::FileClone)?;
         let serial = self.serial.clone();
         let pty_write_out = self.pty_write_out.clone();
+        //let listen_socket_fd = self.in_file.as_raw_fd();
+        let unix_listener = unsafe{UnixListener::from_raw_fd (self.in_file.as_raw_fd())};
+        let mut unix_reader = None;
+        let mode = self.mode.clone();
 
         // In case of PTY, we want to be able to detect a connection on the
         // other end of the PTY. This is done by detecting there's no event
@@ -231,6 +268,8 @@ impl SerialManager {
                     let mut events =
                         vec![epoll::Event::new(epoll::Events::empty(), 0); EPOLL_EVENTS_LEN];
 
+                   // let mut unix_stream:Option<UnixStream> = None;
+
                     loop {
                         let num_events = match epoll::wait(epoll_fd, timeout, &mut events[..]) {
                             Ok(res) => res,
@@ -249,7 +288,8 @@ impl SerialManager {
                                 }
                             }
                         };
-
+                        //PPK: Check this
+                        //if num_events == 0 && mode != ConsoleOutputMode::Unix {
                         if num_events == 0 {
                             // This very specific case happens when the serial is connected
                             // to a PTY. We know EPOLLHUP is always present when there's nothing
@@ -264,13 +304,41 @@ impl SerialManager {
                             match dispatch_event {
                                 EpollDispatch::Unknown => {
                                     let event = event.data;
-                                    warn!("Unknown serial manager loop event: {}", event);
+                                    if event == unix_listener.as_raw_fd() as u64 && mode == ConsoleOutputMode::Unix {
+                                        let (unix_stream, _) = unix_listener.accept().map_err(Error::AcceptConnection)?;
+                                        //PPK: Handle error here, don't panic
+                                        let writer = unix_stream.try_clone().unwrap();
+                                        unix_reader = Some(unix_stream.try_clone().unwrap());
+                                        epoll::ctl(
+                                            epoll_fd,
+                                            epoll::ControlOptions::EPOLL_CTL_ADD,
+                                            unix_stream.into_raw_fd(),
+                                            epoll::Event::new(epoll::Events::EPOLLIN, EpollDispatch::File as u64),
+                                        ).map_err(Error::Epoll)?;
+                                        serial.lock().unwrap().set_out(Box::new(writer));
+
+                                    } else {
+                                        warn!("Unknown serial manager loop event: {}", event);
+                                    }
                                 }
                                 EpollDispatch::File => {
                                     if event.events & libc::EPOLLIN as u32 != 0 {
                                         let mut input = [0u8; 64];
-                                        let count =
-                                            in_file.read(&mut input).map_err(Error::ReadInput)?;
+                                        let count = match mode {
+                                            ConsoleOutputMode::Unix => {
+                                                if let Some(mut serial_reader) = unix_reader {
+                                                    let count = serial_reader.read(&mut input).map_err(Error::ReadInput)?;
+                                                    unix_reader = Some(serial_reader);
+                                                    count
+                                                }
+                                                else {
+                                                    0
+                                                }
+                                            }
+                                            _ => {
+                                                    in_file.read(&mut input).map_err(Error::ReadInput)?
+                                                }
+                                            };
 
                                         // Replace "\n" with "\r" to deal with Windows SAC (#1170)
                                         if count == 1 && input[0] == 0x0a {

@@ -2049,10 +2049,10 @@ impl DeviceManager {
         if serial_config.mode != ConsoleOutputMode::Off {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
             self.serial_manager = match serial_config.mode {
-                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty => {
+                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty | ConsoleOutputMode::Unix => {
                     let serial_manager =
-                        SerialManager::new(serial, self.serial_pty.clone(), serial_config.mode)
-                            .map_err(DeviceManagerError::CreateSerialManager)?;
+                        SerialManager::new(serial, self.serial_pty.clone(),
+                             serial_config.mode, serial_config.unix).map_err(DeviceManagerError::CreateSerialManager)?;
                     if let Some(mut serial_manager) = serial_manager {
                         serial_manager
                             .start_thread(
