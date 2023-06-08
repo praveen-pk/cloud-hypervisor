@@ -1995,6 +1995,10 @@ impl DeviceManager {
                     Endpoint::File(stdout)
                 }
             }
+            ConsoleOutputMode::Socket => {
+                error!("socket option is not supported for Console devices");
+                return Ok(None);
+            }
             ConsoleOutputMode::Null => Endpoint::Null,
             ConsoleOutputMode::Off => return Ok(None),
         };
@@ -2074,15 +2078,19 @@ impl DeviceManager {
                 let _ = self.set_raw_mode(&out);
                 Some(Box::new(out))
             }
-            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
+            ConsoleOutputMode::Off | ConsoleOutputMode::Null | ConsoleOutputMode::Socket => None,
         };
         if serial_config.mode != ConsoleOutputMode::Off {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;
             self.serial_manager = match serial_config.mode {
-                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty => {
-                    let serial_manager =
-                        SerialManager::new(serial, self.serial_pty.clone(), serial_config.mode)
-                            .map_err(DeviceManagerError::CreateSerialManager)?;
+                ConsoleOutputMode::Pty | ConsoleOutputMode::Tty | ConsoleOutputMode::Socket => {
+                    let serial_manager = SerialManager::new(
+                        serial,
+                        self.serial_pty.clone(),
+                        serial_config.mode,
+                        serial_config.socket,
+                    )
+                    .map_err(DeviceManagerError::CreateSerialManager)?;
                     if let Some(mut serial_manager) = serial_manager {
                         serial_manager
                             .start_thread(
