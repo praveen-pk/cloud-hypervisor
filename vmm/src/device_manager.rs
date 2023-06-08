@@ -1966,7 +1966,7 @@ impl DeviceManager {
                 }
             }
             ConsoleOutputMode::Null => Endpoint::Null,
-            ConsoleOutputMode::Off => return Ok(None),
+            ConsoleOutputMode::Off | ConsoleOutputMode::Unix => return Ok(None),
         };
         let id = String::from(CONSOLE_DEVICE_NAME);
 
@@ -2044,7 +2044,7 @@ impl DeviceManager {
                 let _ = self.set_raw_mode(&mut out);
                 Some(Box::new(out))
             }
-            ConsoleOutputMode::Off | ConsoleOutputMode::Null => None,
+            ConsoleOutputMode::Off | ConsoleOutputMode::Null | ConsoleOutputMode::Unix => None,
         };
         if serial_config.mode != ConsoleOutputMode::Off {
             let serial = self.add_serial_device(interrupt_manager, serial_writer)?;

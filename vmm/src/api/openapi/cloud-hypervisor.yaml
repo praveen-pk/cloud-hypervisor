@@ -945,9 +945,11 @@ components:
       properties:
         file:
           type: string
+        unix:
+          type: string
         mode:
           type: string
-          enum: [Off, Pty, Tty, File, Null]
+          enum: [Off, Pty, Tty, File, Unix, Null]
         iommu:
           type: boolean
           default: false

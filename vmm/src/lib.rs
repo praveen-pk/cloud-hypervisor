@@ -2145,11 +2145,13 @@ mod unit_tests {
                 file: None,
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
+                unix: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
+                unix: None,
             },
             devices: None,
             user_devices: None,

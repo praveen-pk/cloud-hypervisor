@@ -1322,10 +1322,12 @@ impl ConsoleConfig {
             .add_valueless("tty")
             .add_valueless("null")
             .add("file")
-            .add("iommu");
+            .add("iommu")
+            .add("unix");
         parser.parse(console).map_err(Error::ParseConsole)?;
 
         let mut file: Option<PathBuf> = default_consoleconfig_file();
+        let mut unix: Option<PathBuf> = default_consoleconfig_file();
         let mut mode: ConsoleOutputMode = ConsoleOutputMode::Off;
 
         if parser.is_set("off") {
@@ -1341,6 +1343,12 @@ impl ConsoleConfig {
                 Some(PathBuf::from(parser.get("file").ok_or(
                     Error::Validation(ValidationError::ConsoleFileMissing),
                 )?));
+        }else if parser.is_set("unix") {
+            mode = ConsoleOutputMode::Unix;
+            unix =
+                Some(PathBuf::from(parser.get("unix").ok_or(
+                    Error::Validation(ValidationError::ConsoleFileMissing),
+                )?));
         } else {
             return Err(Error::ParseConsoleInvalidModeGiven);
         }
@@ -1350,7 +1358,7 @@ impl ConsoleConfig {
             .unwrap_or(Toggle(false))
             .0;
 
-        Ok(Self { file, mode, iommu })
+        Ok(Self { file, mode, iommu, unix })
     }
 }
 
@@ -2564,6 +2572,7 @@ mod tests {
                 mode: ConsoleOutputMode::Off,
                 iommu: false,
                 file: None,
+                unix: None,
             }
         );
         assert_eq!(
@@ -2572,6 +2581,7 @@ mod tests {
                 mode: ConsoleOutputMode::Pty,
                 iommu: false,
                 file: None,
+                unix: None,
             }
         );
         assert_eq!(
@@ -2580,6 +2590,7 @@ mod tests {
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 file: None,
+                unix: None,
             }
         );
         assert_eq!(
@@ -2588,6 +2599,7 @@ mod tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 file: None,
+                unix: None,
             }
         );
         assert_eq!(
@@ -2595,7 +2607,8 @@ mod tests {
             ConsoleConfig {
                 mode: ConsoleOutputMode::File,
                 iommu: false,
-                file: Some(PathBuf::from("/tmp/console"))
+                file: Some(PathBuf::from("/tmp/console")),
+                unix: None,
             }
         );
         assert_eq!(
@@ -2604,6 +2617,7 @@ mod tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: true,
                 file: None,
+                unix: None,
             }
         );
         assert_eq!(
@@ -2611,7 +2625,17 @@ mod tests {
             ConsoleConfig {
                 mode: ConsoleOutputMode::File,
                 iommu: true,
-                file: Some(PathBuf::from("/tmp/console"))
+                file: Some(PathBuf::from("/tmp/console")),
+                unix: None,
+            }
+        );
+        assert_eq!(
+            ConsoleConfig::parse("unix=/tmp/serial.sock,iommu=on")?,
+            ConsoleConfig {
+                mode: ConsoleOutputMode::Unix,
+                iommu: true,
+                file: Some(PathBuf::from("/tmp/serial.sock")),
+                unix: None,
             }
         );
         Ok(())
