@@ -23,6 +23,7 @@ use std::{io, result, thread};
 use thiserror::Error;
 use vmm_sys_util::eventfd::EventFd;
 use std::os::fd::IntoRawFd;
+use std::net::Shutdown;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -65,6 +66,14 @@ pub enum Error {
     /// Cannot accpet connection from Unix Socket
     #[error("Error accepting connection: {0}")]
     AcceptConnection(#[source] io::Error),
+
+    /// Cannot shutdown Unix Stream
+    #[error("Error shutting down Unix Stream: {0}")]
+    ShutdownConnection(#[source] io::Error),
+
+    /// Cannot remove Serial Unix Socket
+    #[error("Error removing Serial Unix Socket: {0}")]
+    RemoveUnixSocket(#[source] io::Error),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -98,6 +107,7 @@ pub struct SerialManager {
     handle: Option<thread::JoinHandle<()>>,
     pty_write_out: Option<Arc<AtomicBool>>,
     mode: ConsoleOutputMode,
+    sock_path: Option<PathBuf>,
 }
 
 impl SerialManager {
@@ -108,6 +118,7 @@ impl SerialManager {
         mode: ConsoleOutputMode,
         unix_socket: Option<PathBuf>
     ) -> Result<Option<Self>> {
+        let mut sock_path = None;
         let in_file = match mode {
             ConsoleOutputMode::Pty => {
                 if let Some(pty_pair) = pty_pair {
@@ -144,8 +155,9 @@ impl SerialManager {
                 }
             }
             ConsoleOutputMode::Unix => {
-                if let Some(sock_path) = unix_socket {
-                    let listener = UnixListener::bind(sock_path.as_path()).map_err(Error::BindUnixSocket)?;
+                if let Some(usock_path) = unix_socket {
+                    sock_path = Some(usock_path.clone());
+                    let listener = UnixListener::bind(usock_path.as_path()).map_err(Error::BindUnixSocket)?;
                     //PPK: Check this
                     //listener.set_nonblocking(true).map_err(Error::EventFd)?;
                     unsafe{File::from_raw_fd(listener.into_raw_fd())}
@@ -204,7 +216,8 @@ impl SerialManager {
             kill_evt,
             handle: None,
             pty_write_out,
-            mode
+            mode,
+            sock_path,
         }))
     }
 
@@ -328,7 +341,14 @@ impl SerialManager {
                                             ConsoleOutputMode::Unix => {
                                                 if let Some(mut serial_reader) = unix_reader {
                                                     let count = serial_reader.read(&mut input).map_err(Error::ReadInput)?;
-                                                    unix_reader = Some(serial_reader);
+                                                    if count == 0 {
+                                                        serial_reader.shutdown(Shutdown::Both).map_err(Error::ShutdownConnection)?;
+                                                        unix_reader = None;
+                                                        warn!("Stream closed!");
+                                                    }
+                                                    else {
+                                                        unix_reader = Some(serial_reader);
+                                                    }
                                                     count
                                                 }
                                                 else {
@@ -392,6 +412,9 @@ impl Drop for SerialManager {
         self.kill_evt.write(1).ok();
         if let Some(handle) = self.handle.take() {
             handle.join().ok();
+        }
+        if self.mode == ConsoleOutputMode::Unix {
+            std::fs::remove_file(self.sock_path.as_ref().unwrap().as_os_str()).map_err(Error::RemoveUnixSocket).ok();
         }
     }
 }
