@@ -3887,6 +3887,178 @@ mod common_parallel {
     }
 
     #[test]
+    fn test_serial_socket() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        let serial_socket = guest.tmp_dir.as_path().join("/tmp/serial.socket");
+        #[cfg(target_arch = "x86_64")]
+        let console_str: &str = "console=ttyS0";
+        #[cfg(target_arch = "aarch64")]
+        let console_str: &str = "console=ttyAMA0";
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args([
+                "--cmdline",
+                DIRECT_KERNEL_BOOT_CMDLINE
+                    .replace("console=hvc0 ", console_str)
+                    .as_str(),
+            ])
+            .default_disks()
+            .default_net()
+            .args([
+                "--serial",
+                format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Test that there is a ttyS0
+            assert_eq!(
+                guest
+                    .ssh_command(GREP_SERIAL_IRQ_CMD)
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
+
+        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+
+        let r = std::panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            assert!(output.status.success());
+
+            // Do this check after shutdown of the VM as an easy way to ensure
+            // all writes are flushed to disk
+            let mut f = std::fs::File::open(serial_socket).unwrap();
+            let mut buf = String::new();
+            f.read_to_string(&mut buf).unwrap();
+            assert!(buf.contains(CONSOLE_TEST_STRING));
+        });
+
+        handle_child_output(r, &output);
+    }
+/*
+    #[test]
+    fn test_serial_socket_interaction() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+        let serial_socket = guest.tmp_dir.as_path().join("/tmp/serial.socket");
+        let serial_socket_pty = guest.tmp_dir.as_path().join("/tmp/serial.pty");
+        let serial_option = if cfg!(target_arch = "x86_64") {
+            " console=ttyS0"
+        } else {
+            " console=ttyAMA0"
+        };
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
+            .args([
+                "--cmdline",
+                DIRECT_KERNEL_BOOT_CMDLINE
+                    .replace("console=hvc0 ", serial_option)
+                    .as_str(),
+            ])
+            .default_disks()
+            .default_net()
+            .args([
+                "--serial",
+                format!("socket={}", serial_socket.to_str().unwrap()).as_str(),
+            ])
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let mut socat_command = Command::new("socat");
+        let socat_args = [
+            &format!("pty,link={}",serial_socket_pty.display()),
+            &format!("UNIX-CONNECT:{}",serial_socket.display())
+        ];
+        socat_command.args(socat_args);
+        let mut socat_child;
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            match socat_command.spawn():
+                Ok(x) =>
+            socat_child = socat_command.spawn();
+
+            let mut cf = std::fs::OpenOptions::new()
+                .write(true)
+                .read(true)
+                .open(serial_socket_pty)
+                .unwrap();
+
+            // Some dumb sleeps but we don't want to write
+            // before the console is up and we don't want
+            // to try and write the next line before the
+            // login process is ready.
+            thread::sleep(std::time::Duration::new(5, 0));
+            assert_eq!(cf.write(b"cloud\n").unwrap(), 6);
+            thread::sleep(std::time::Duration::new(2, 0));
+            assert_eq!(cf.write(b"cloud123\n").unwrap(), 9);
+            thread::sleep(std::time::Duration::new(2, 0));
+            assert_eq!(cf.write(b"echo test_pty_console\n").unwrap(), 22);
+            thread::sleep(std::time::Duration::new(2, 0));
+
+            // read pty and ensure they have a login shell
+            // some fairly hacky workarounds to avoid looping
+            // forever in case the channel is blocked getting output
+            let ptyc = pty_read(cf);
+            let mut empty = 0;
+            let mut prev = String::new();
+            loop {
+                thread::sleep(std::time::Duration::new(2, 0));
+                match ptyc.try_recv() {
+                    Ok(line) => {
+                        empty = 0;
+                        prev = prev + &line;
+                        if prev.contains("test_pty_console") {
+                            break;
+                        }
+                    }
+                    Err(mpsc::TryRecvError::Empty) => {
+                        empty += 1;
+                        assert!(empty <= 5, "No login on pty");
+                    }
+                    _ => panic!("No login on pty"),
+                }
+            }
+
+            guest.ssh_command("sudo shutdown -h now").unwrap();
+        });
+
+        let _ = child.wait_timeout(std::time::Duration::from_secs(20));
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+        handle_child_output(r, &output);
+        socat_child.kill();
+        let r = std::panic::catch_unwind(|| {
+            // Check that the cloud-hypervisor binary actually terminated
+            assert!(output.status.success())
+        });
+        handle_child_output(r, &output);
+    } */
+
+    #[test]
     fn test_pty_interaction() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
