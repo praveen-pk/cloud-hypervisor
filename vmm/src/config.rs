@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::landlock_rules;
 pub use crate::vm_config::*;
 use clap::ArgMatches;
 use option_parser::{
@@ -49,6 +50,8 @@ pub enum Error {
     ParseRateLimiterGroup(OptionParserError),
     /// Error parsing disk options
     ParseDisk(OptionParserError),
+    /// Error parsing Landlock options
+    ParseLandLock(OptionParserError),
     /// Error parsing network options
     ParseNetwork(OptionParserError),
     /// Error parsing RNG options
@@ -161,6 +164,8 @@ pub enum ValidationError {
     InvalidNumPciSegments(u16),
     /// Invalid PCI segment id
     InvalidPciSegment(u16),
+    /// Invalid path in landlock rules
+    InvalidLandLockPath(PathBuf),
     /// Balloon too big
     BalloonLargerThanRam(u64, u64),
     /// On a IOMMU segment but not behind IOMMU
@@ -284,6 +289,9 @@ impl fmt::Display for ValidationError {
             InvalidIdentifier(s) => {
                 write!(f, "Identifier {s} is invalid")
             }
+            InvalidLandLockPath(p)  => {
+                write!(f, "Path {:?} doesn't exist", p.as_path())
+            }
             IommuNotSupported => {
                 write!(f, "Device does not support being placed behind IOMMU")
             }
@@ -325,6 +333,7 @@ impl fmt::Display for Error {
             ParseFileSystem(o) => write!(f, "Error parsing --fs: {o}"),
             ParseFsSockMissing => write!(f, "Error parsing --fs: socket missing"),
             ParseFsTagMissing => write!(f, "Error parsing --fs: tag missing"),
+            ParseLandLock(o) => write!(f, "Error parsing --landlock rules: {o}"),
             ParsePersistentMemory(o) => write!(f, "Error parsing --pmem: {o}"),
             ParsePmemFileMissing => write!(f, "Error parsing --pmem: file missing"),
             ParseVsock(o) => write!(f, "Error parsing --vsock: {o}"),
@@ -387,6 +396,7 @@ pub struct VmParams<'a> {
     pub cmdline: Option<&'a str>,
     pub rate_limit_groups: Option<Vec<&'a str>>,
     pub disks: Option<Vec<&'a str>>,
+    pub landlock_rules: Option<Vec<&'a str>>,
     pub net: Option<Vec<&'a str>>,
     pub rng: &'a str,
     pub balloon: Option<&'a str>,
@@ -430,6 +440,9 @@ impl<'a> VmParams<'a> {
             .map(|x| x.map(|y| y as &str).collect());
         let disks: Option<Vec<&str>> = args
             .get_many::<String>("disk")
+            .map(|x| x.map(|y| y as &str).collect());
+        let landlock_rules: Option<Vec<&str>> = args
+            .get_many::<String>("landlock-rules")
             .map(|x| x.map(|y| y as &str).collect());
         let net: Option<Vec<&str>> = args
             .get_many::<String>("net")
@@ -477,6 +490,7 @@ impl<'a> VmParams<'a> {
             cmdline,
             rate_limit_groups,
             disks,
+            landlock_rules,
             net,
             rng,
             balloon,
@@ -959,6 +973,43 @@ impl RateLimiterGroupConfig {
             return Err(ValidationError::InvalidRateLimiterGroup);
         }
 
+        Ok(())
+    }
+}
+
+impl LandLockRules {
+    pub const SYNTAX: &'static str = "Lanlock parameters \
+        \"path=<path>,flags={r,w,x}\"";
+
+    pub fn parse(landlock_rule: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser
+            .add("path")
+            .add("flags");
+        parser.parse(landlock_rule).map_err(|e| Error::ParseLandLock(e))?;
+
+        let path = parser.get("path").map(PathBuf::from).unwrap();
+        let mut flags: u8 = 0;
+        for c in parser.get("flags").unwrap().chars() {
+            match c {
+                'r' => flags |= landlock_rules::READ,
+                'w' => flags |= landlock_rules::WRITE,
+                'x' => flags |= landlock_rules::EXECUTE,
+                _ => return Err(Error::ParseLandLock(OptionParserError::UnknownOption(c.to_string()))),
+            }
+        }
+
+        Ok(LandLockRules {
+            path,
+            flags,
+        })
+    }
+
+    pub fn validate(&self, _vm_config: &VmConfig) -> ValidationResult<()> {
+        //PPK_TODO: The input path should exist
+        if !self.path.exists() {
+            return Err(ValidationError::InvalidLandLockPath(self.path.clone()));
+        }
         Ok(())
     }
 }
@@ -2105,6 +2156,12 @@ impl VmConfig {
             }
         }
 
+        if let Some(landlock_rules) = &self.landlock_rules {
+            for landlock_rule in landlock_rules {
+                landlock_rule.validate(self)?;
+            }
+        }
+
         if let Some(nets) = &self.net {
             for net in nets {
                 if net.vhost_user && !self.backed_by_shared_memory() {
@@ -2326,6 +2383,16 @@ impl VmConfig {
             disks = Some(disk_config_list);
         }
 
+        let mut landlock_rules: Option<Vec<LandLockRules>> = None;
+        if let Some(landlock_paths_list) = &vm_params.landlock_rules {
+            let mut landlock_rules_list: Vec<LandLockRules> = Vec::new();
+            for item in landlock_paths_list.iter() {
+                let landlock_config = LandLockRules::parse(item)?;
+                landlock_rules_list.push(landlock_config);
+            }
+            landlock_rules = Some(landlock_rules_list);
+        }
+
         let mut net: Option<Vec<NetConfig>> = None;
         if let Some(net_list) = &vm_params.net {
             let mut net_config_list = Vec::new();
@@ -2464,6 +2531,7 @@ impl VmConfig {
             payload,
             rate_limit_groups,
             disks,
+            landlock_rules,
             net,
             rng,
             balloon,
@@ -2588,6 +2656,7 @@ impl Clone for VmConfig {
             payload: self.payload.clone(),
             rate_limit_groups: self.rate_limit_groups.clone(),
             disks: self.disks.clone(),
+            landlock_rules: self.landlock_rules.clone(),
             net: self.net.clone(),
             rng: self.rng.clone(),
             balloon: self.balloon.clone(),

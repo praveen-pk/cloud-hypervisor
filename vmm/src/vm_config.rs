@@ -246,6 +246,13 @@ pub struct DiskConfig {
     pub serial: Option<String>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LandLockRules {
+    pub path: PathBuf,
+    #[serde(default)]
+    pub flags: u8,
+}
+
 pub const DEFAULT_DISK_NUM_QUEUES: usize = 1;
 
 pub fn default_diskconfig_num_queues() -> usize {
@@ -613,6 +620,7 @@ pub struct VmConfig {
     pub payload: Option<PayloadConfig>,
     pub rate_limit_groups: Option<Vec<RateLimiterGroupConfig>>,
     pub disks: Option<Vec<DiskConfig>>,
+    pub landlock_rules: Option<Vec<LandLockRules>>,
     pub net: Option<Vec<NetConfig>>,
     #[serde(default)]
     pub rng: RngConfig,

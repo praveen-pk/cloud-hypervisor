@@ -72,6 +72,7 @@ mod gdb;
 #[cfg(feature = "igvm")]
 mod igvm;
 pub mod interrupt;
+pub mod landlock_rules;
 pub mod memory_manager;
 pub mod migration;
 mod pci_segment;

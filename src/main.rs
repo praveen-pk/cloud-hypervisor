@@ -255,6 +255,13 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
                 .group("vm-config"),
         )
         .arg(
+            Arg::new("landlock-rules")
+                .long("landlock-rules")
+                .help(config::LandLockRules::SYNTAX)
+                .num_args(1..)
+                .group("vm-config"),
+        )
+        .arg(
             Arg::new("net")
                 .long("net")
                 .help(config::NetConfig::SYNTAX)
@@ -889,6 +896,7 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_rules: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
