@@ -620,7 +620,6 @@ pub struct VmConfig {
     pub payload: Option<PayloadConfig>,
     pub rate_limit_groups: Option<Vec<RateLimiterGroupConfig>>,
     pub disks: Option<Vec<DiskConfig>>,
-    pub landlock_rules: Option<Vec<LandLockRules>>,
     pub net: Option<Vec<NetConfig>>,
     #[serde(default)]
     pub rng: RngConfig,

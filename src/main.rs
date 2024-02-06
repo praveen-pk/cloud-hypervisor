@@ -896,7 +896,6 @@ mod unit_tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
-            landlock_rules: None,
         };
 
         assert_eq!(expected_vm_config, result_vm_config);
