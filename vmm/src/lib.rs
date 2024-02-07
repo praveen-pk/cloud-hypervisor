@@ -27,6 +27,7 @@ use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
+use landlock_rules::LandlockError;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -161,6 +162,10 @@ pub enum Error {
     /// Cannot apply seccomp filter
     #[error("Error applying seccomp filter: {0}")]
     ApplySeccompFilter(seccompiler::Error),
+
+    /// Cannot apply Landlock
+    #[error("Error enabling Landlock: {0}")]
+    ApplyLandlock(LandlockError),
 
     /// Error activating virtio devices
     #[error("Error activating virtio devices: {0:?}")]
@@ -345,7 +350,11 @@ pub fn start_event_monitor_thread(
                         e
                     })?;
             }
-
+            landlock_rules::landlock_thread().map_err(|e| {
+                error!("Error applying landlock rules: {:?}", e);
+                exit_event.write(1).ok();
+                e
+            }).map_err(Error::ApplyLandlock)?;
             std::panic::catch_unwind(AssertUnwindSafe(move || {
                 while let Ok(event) = monitor.rx.recv() {
                     let event = Arc::new(event);
