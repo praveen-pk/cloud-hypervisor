@@ -12,15 +12,17 @@ use log::{warn, LevelFilter};
 use option_parser::OptionParser;
 use seccompiler::SeccompAction;
 use signal_hook::consts::SIGSYS;
+use vmm::vm_config::LandLockConfig;
 use std::env;
 use std::fs::File;
 use std::os::unix::io::{FromRawFd, RawFd};
+use std::path::PathBuf;
 use std::sync::mpsc::channel;
 use std::sync::{Arc, Mutex};
 use thiserror::Error;
 #[cfg(feature = "dbus_api")]
 use vmm::api::dbus::{dbus_api_graceful_shutdown, DBusApiOptions};
-use vmm::config;
+use vmm::{config, landlock_rules};
 use vmm_sys_util::eventfd::EventFd;
 use vmm_sys_util::signal::block_signal;
 
@@ -257,9 +259,9 @@ fn create_app(default_vcpus: String, default_memory: String, default_rng: String
         .arg(
             Arg::new("landlock-rules")
                 .long("landlock-rules")
-                .help(config::LandLockRules::SYNTAX)
+                .help(config::LandLockConfig::SYNTAX)
                 .num_args(1..)
-                .group("vm-config"),
+                .group("vmm-config"),
         )
         .arg(
             Arg::new("net")
@@ -483,11 +485,25 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         _ => LevelFilter::Trace,
     };
 
+    let mut landlock_config: Option<Vec<LandLockConfig>> = None;
+    if let Some(landlock_params_list) = cmd_arguments.get_many::<String>("landlock-rules") {
+        let mut landlock_config_from_args = Vec::new();
+        for rule in landlock_params_list {
+            let landlock_config = LandLockConfig::parse(rule).map_err(Error::ParsingConfig)?;
+            landlock_config_from_args.push(landlock_config);
+        }
+        landlock_config = Some(landlock_config_from_args);
+    }
+
     let log_file: Box<dyn std::io::Write + Send> = if let Some(ref file) =
         cmd_arguments.get_one::<String>("log-file")
     {
+        landlock_config.as_mut().unwrap().push(LandLockConfig{
+            path: PathBuf::from(file),
+            flags: landlock_rules::READ|landlock_rules::WRITE});
         Box::new(std::fs::File::create(std::path::Path::new(file)).map_err(Error::LogFileCreation)?)
     } else {
+        //TODO: Check if stderr should be added to landlock rules
         Box::new(std::io::stderr())
     };
 
@@ -522,6 +538,11 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         } else {
             (None, None)
         };
+    if api_socket_path.is_some(){
+        landlock_config.as_mut().unwrap().push(LandLockConfig{
+            path: PathBuf::from(api_socket_path.as_ref().unwrap()),
+            flags: landlock_rules::READ|landlock_rules::WRITE});
+    }
 
     let (api_request_sender, api_request_receiver) = channel();
     let api_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateApiEventFd)?;
@@ -573,6 +594,12 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
         }
     }
 
+
+
+    landlock_config.as_mut().unwrap().push(LandLockConfig{
+        path: PathBuf::from(hypervisor::hypervisor_path().map_err(Error::CreateHypervisor)?),
+        flags: landlock_rules::READ|landlock_rules::WRITE});
+
     let hypervisor = hypervisor::new().map_err(Error::CreateHypervisor)?;
 
     #[cfg(feature = "guest_debug")]
@@ -589,6 +616,14 @@ fn start_vmm(cmd_arguments: ArgMatches) -> Result<Option<String>, Error> {
     } else {
         None
     };
+
+    #[cfg(feature = "guest_debug")]
+    if gdb_socket_path.is_some(){
+        landlock_config.as_mut().unwrap().push(LandLockConfig{
+            path: gdb_socket_path.as_ref().unwrap(),
+            flags: landlock_rules::READ|landlock_rules::WRITE});
+    }
+
     #[cfg(feature = "guest_debug")]
     let debug_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::CreateDebugEventFd)?;
     #[cfg(feature = "guest_debug")]

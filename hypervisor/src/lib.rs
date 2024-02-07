@@ -85,6 +85,21 @@ pub fn new() -> std::result::Result<Arc<dyn Hypervisor>, HypervisorError> {
     )))
 }
 
+pub fn hypervisor_path() -> std::result::Result<String, HypervisorError> {
+    #[cfg(feature = "kvm")]
+    if kvm::KvmHypervisor::is_available()? {
+        return Ok("/dev/kvm".to_string());
+    }
+
+    #[cfg(feature = "mshv")]
+    if mshv::MshvHypervisor::is_available()? {
+        return Ok("/dev/mshv".to_string());
+    }
+
+    Err(HypervisorError::HypervisorCreate(anyhow!(
+        "no supported hypervisor"
+    )))
+}
 // Returns a `Vec<T>` with a size in bytes at least as large as `size_in_bytes`.
 fn vec_with_size_in_bytes<T: Default>(size_in_bytes: usize) -> Vec<T> {
     let rounded_size = (size_in_bytes + size_of::<T>() - 1) / size_of::<T>();

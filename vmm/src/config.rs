@@ -972,7 +972,7 @@ impl RateLimiterGroupConfig {
     }
 }
 
-impl LandLockRules {
+impl LandLockConfig {
     pub const SYNTAX: &'static str = "Lanlock parameters \
         \"path=<path>,flags={r,w,x}\"";
 
@@ -994,7 +994,7 @@ impl LandLockRules {
             }
         }
 
-        Ok(LandLockRules {
+        Ok(LandLockConfig {
             path,
             flags,
         })

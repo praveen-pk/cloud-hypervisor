@@ -247,7 +247,7 @@ pub struct DiskConfig {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
-pub struct LandLockRules {
+pub struct LandLockConfig {
     pub path: PathBuf,
     #[serde(default)]
     pub flags: u8,
