@@ -27,7 +27,7 @@ use crate::vm::{Error as VmError, Vm, VmState};
 use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
-use landlock_rules::LandlockError;
+use landlock_rules::{LandLock, LandlockError};
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -35,6 +35,7 @@ use seccompiler::{apply_filter, SeccompAction};
 use serde::ser::{SerializeStruct, Serializer};
 use serde::{Deserialize, Serialize};
 use signal_hook::iterator::{Handle, Signals};
+use vm_config::LandLockConfig;
 use std::collections::HashMap;
 use std::fs::File;
 use std::io;
@@ -198,6 +199,9 @@ pub enum Error {
 
     #[error("Failed to join on threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+
+    #[error("Failed while enabling Landlock: {0:?}")]
+    LandlockSetup(LandlockError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -396,6 +400,7 @@ pub fn start_vmm_thread(
     exit_event: EventFd,
     seccomp_action: &SeccompAction,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    landlock_config: Option<Vec<LandLockConfig>>,
 ) -> Result<VmmThreadHandle> {
     #[cfg(feature = "guest_debug")]
     let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
@@ -434,6 +439,7 @@ pub fn start_vmm_thread(
                     vmm_seccomp_action,
                     hypervisor,
                     exit_event,
+                    landlock_config,
                 )?;
 
                 vmm.setup_signal_handler()?;
@@ -553,6 +559,7 @@ pub struct Vmm {
     signals: Option<Handle>,
     threads: Vec<thread::JoinHandle<()>>,
     original_termios_opt: Arc<Mutex<Option<termios>>>,
+    landlock_config: Option<Vec<LandLockConfig>>,
 }
 
 impl Vmm {
@@ -618,6 +625,12 @@ impl Vmm {
                                     return;
                                 }
                             }
+                            let _ = landlock_rules::landlock_thread().map_err(|e| {
+                                error!("Error applying landlock rules: {:?}", e);
+                                exit_evt.write(1).ok();
+                                return;
+                            });
+
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
                                 Vmm::signal_handler(signals, original_termios_opt, &exit_evt);
                             }))
@@ -643,6 +656,7 @@ impl Vmm {
         seccomp_action: SeccompAction,
         hypervisor: Arc<dyn hypervisor::Hypervisor>,
         exit_evt: EventFd,
+        landlock_config: Option<Vec<LandLockConfig>>,
     ) -> Result<Self> {
         let mut epoll = EpollContext::new().map_err(Error::Epoll)?;
         let reset_evt = EventFd::new(EFD_NONBLOCK).map_err(Error::EventFdCreate)?;
@@ -687,7 +701,41 @@ impl Vmm {
             signals: None,
             threads: vec![],
             original_termios_opt: Arc::new(Mutex::new(None)),
+            landlock_config: landlock_config,
         })
+    }
+
+    fn apply_landlock(&self) -> result::Result<(), Error> {
+        let mut landlock = LandLock::new().map_err(Error::LandlockSetup)?;
+
+        if let Some(config) = &self.landlock_config {
+            landlock.apply_config(config.to_vec()).map_err(Error::ApplyLandlock)?;
+        }
+
+        for disk in self.vm_config.as_ref().unwrap().lock().unwrap().clone().disks.as_ref().unwrap().iter() {
+            if disk.path.is_some() {
+                let disk_path = disk.path.as_ref().unwrap();
+                if disk_path.is_dir() {
+                    landlock
+                        .add_rule(disk_path.to_path_buf(), landlock_rules::LandLockAccess::DirWrite)
+                        .map_err(Error::ApplyLandlock)?;
+                }
+                if disk_path.is_file() {
+                    landlock
+                        .add_rule(disk_path.to_path_buf(), landlock_rules::LandLockAccess::FileWrite)
+                        .map_err(Error::ApplyLandlock)?;
+                }
+            }
+        }
+        let payload_path = self.vm_config.as_ref().unwrap().lock().unwrap().clone().payload.as_ref().unwrap().kernel.as_ref().unwrap().to_path_buf();
+        landlock
+            .add_rule(payload_path, landlock_rules::LandLockAccess::FileRead)
+            .map_err(Error::ApplyLandlock)?;
+        landlock.add_rule("/dev/urandom".into(), landlock_rules::LandLockAccess::FileWrite).map_err(Error::LandlockSetup)?;
+        landlock.add_rule("/dev/net/tun".into(), landlock_rules::LandLockAccess::FileWrite).map_err(Error::LandlockSetup)?;
+        //landlock.add_rule("/home/prapal/Sandbox/x86_64/vms".into(), landlock_rules::LandLockAccess::FileWrite).map_err(Error::LandlockSetup)?;
+        landlock.restrict_self().map_err(Error::LandlockSetup)?;
+        Ok(())
     }
 
     fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
@@ -695,10 +743,18 @@ impl Vmm {
         // The VM will be created when being asked to boot it.
         if self.vm_config.is_none() {
             self.vm_config = Some(config);
-            Ok(())
+            //PPK_TODO: Apply landlock rules here
+            let ret = self.apply_landlock();
+            match ret {
+                Ok(_) => return Ok(()),
+                Err(_) => return Err(VmError::ApplyLandlock),
+            };
+            //self.apply_landlock().map_err(|e|(anyhow!("Error Applying Landlock: {}", e)))?;
+
         } else {
             Err(VmError::VmAlreadyCreated)
         }
+
     }
 
     fn vm_boot(&mut self) -> result::Result<(), VmError> {
@@ -2263,6 +2319,7 @@ mod unit_tests {
             SeccompAction::Allow,
             hypervisor::new().unwrap(),
             EventFd::new(EFD_NONBLOCK).unwrap(),
+            None,
         )
         .unwrap()
     }

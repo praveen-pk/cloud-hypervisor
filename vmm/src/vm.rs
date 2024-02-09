@@ -20,7 +20,7 @@ use crate::config::{NumaConfig, PayloadConfig};
 use crate::coredump::{
     CpuElf64Writable, DumpState, Elf64Writable, GuestDebuggable, GuestDebuggableError, NoteDescType,
 };
-use crate::cpu;
+use crate::{cpu, landlock_rules};
 use crate::device_manager::{DeviceManager, DeviceManagerError, PtyPair};
 use crate::device_tree::DeviceTree;
 #[cfg(feature = "guest_debug")]
@@ -222,6 +222,9 @@ pub enum Error {
 
     #[error("Cannot apply seccomp filter: {0}")]
     ApplySeccompFilter(#[source] seccompiler::Error),
+
+    #[error("Cannot apply Landlock Rules")]
+    ApplyLandlock,
 
     #[error("Failed resizing a memory zone")]
     ResizeZone,

@@ -9,6 +9,8 @@ use landlock::{
 use std::{sync::Mutex, path::PathBuf};
 use thiserror::Error;
 
+use crate::vm_config::LandLockConfig;
+
 pub const READ: u8 = 1 << 0;
 pub const WRITE: u8 = 1 << 1;
 pub const EXECUTE: u8 = 1 << 2;
@@ -58,6 +60,19 @@ impl LandLock {
             Ok(LandLock{
                 ruleset: Some(Mutex::new(ruleset)),
                 abi: abi})
+    }
+
+    pub fn apply_config(&mut self, landlock_config: Vec<LandLockConfig>) -> Result<(), LandlockError> {
+        for config in landlock_config {
+            //PPK_TODO: Translate the perms here
+            if config.path.is_file(){
+                self.add_rule(config.path, LandLockAccess::FileWrite)?;
+            }
+            else if config.path.is_dir() {
+                self.add_rule(config.path, LandLockAccess::DirWrite)?;
+            }
+        }
+        Ok(())
     }
 
     pub fn add_rule(&mut self, path: PathBuf, rule: LandLockAccess) -> Result<(), LandlockError> {
