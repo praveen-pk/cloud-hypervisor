@@ -18,6 +18,7 @@ use crate::config::{
 };
 #[cfg(all(target_arch = "x86_64", feature = "guest_debug"))]
 use crate::coredump::GuestDebuggable;
+use crate::landlock::Landlock;
 use crate::memory_manager::MemoryManager;
 #[cfg(all(feature = "kvm", target_arch = "x86_64"))]
 use crate::migration::get_vm_snapshot;
@@ -28,6 +29,7 @@ use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
+use landlock::LandlockError;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
 use pci::PciBdf;
@@ -194,6 +196,10 @@ pub enum Error {
 
     #[error("Failed to join on threads: {0:?}")]
     ThreadCleanup(std::boxed::Box<dyn std::any::Any + std::marker::Send>),
+
+    /// Cannot apply landlock LSM
+    #[error("Error applying Landlock LSM: {0}")]
+    ApplyLandlock(LandlockError),
 }
 pub type Result<T> = result::Result<T, Error>;
 
@@ -326,6 +332,7 @@ pub fn feature_list() -> Vec<String> {
 pub fn start_event_monitor_thread(
     mut monitor: event_monitor::Monitor,
     seccomp_action: &SeccompAction,
+    landlock_enable: bool,
     hypervisor_type: hypervisor::HypervisorType,
     exit_event: EventFd,
 ) -> Result<thread::JoinHandle<Result<()>>> {
@@ -342,6 +349,17 @@ pub fn start_event_monitor_thread(
                     .map_err(Error::ApplySeccompFilter)
                     .map_err(|e| {
                         error!("Error applying seccomp filter: {:?}", e);
+                        exit_event.write(1).ok();
+                        e
+                    })?;
+            }
+            if landlock_enable {
+                Landlock::new()
+                    .map_err(Error::ApplyLandlock)?
+                    .restrict_self()
+                    .map_err(Error::ApplyLandlock)
+                    .map_err(|e| {
+                        error!("Error applying landlock to event monitor thread: {:?}", e);
                         exit_event.write(1).ok();
                         e
                     })?;
