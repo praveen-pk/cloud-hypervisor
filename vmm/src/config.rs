@@ -443,6 +443,7 @@ pub struct VmParams<'a> {
     pub igvm: Option<&'a str>,
     #[cfg(feature = "sev_snp")]
     pub host_data: Option<&'a str>,
+    pub landlock_enable: bool,
 }
 
 impl<'a> VmParams<'a> {
@@ -505,6 +506,7 @@ impl<'a> VmParams<'a> {
         let igvm = args.get_one::<String>("igvm").map(|x| x as &str);
         #[cfg(feature = "sev_snp")]
         let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
+        let landlock_enable = args.get_flag("landlock");
         VmParams {
             cpus,
             memory,
@@ -541,6 +543,7 @@ impl<'a> VmParams<'a> {
             igvm,
             #[cfg(feature = "sev_snp")]
             host_data,
+            landlock_enable,
         }
     }
 }
@@ -2636,6 +2639,7 @@ impl VmConfig {
             platform,
             tpm,
             preserved_fds: None,
+            landlock_enable: vm_params.landlock_enable,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -3529,6 +3533,7 @@ mod tests {
             platform: None,
             tpm: None,
             preserved_fds: None,
+            landlock_enable: false,
         };
 
         assert!(valid_config.validate().is_ok());
