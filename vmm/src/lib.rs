@@ -404,6 +404,7 @@ pub fn start_vmm_thread(
     #[cfg(feature = "guest_debug")] vm_debug_event: EventFd,
     exit_event: EventFd,
     seccomp_action: &SeccompAction,
+    landlock_enable: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
 ) -> Result<VmmThreadHandle> {
     #[cfg(feature = "guest_debug")]
@@ -445,7 +446,7 @@ pub fn start_vmm_thread(
                     exit_event,
                 )?;
 
-                vmm.setup_signal_handler()?;
+                vmm.setup_signal_handler(landlock_enable)?;
 
                 vmm.control_loop(
                     Rc::new(api_receiver),
@@ -604,7 +605,7 @@ impl Vmm {
         }
     }
 
-    fn setup_signal_handler(&mut self) -> Result<()> {
+    fn setup_signal_handler(&mut self, landlock_enable: bool) -> Result<()> {
         let signals = Signals::new(Self::HANDLED_SIGNALS);
         match signals {
             Ok(signals) => {
@@ -631,6 +632,13 @@ impl Vmm {
                                     return;
                                 }
                             }
+                            if landlock_enable{
+                                let _ = Landlock::new().unwrap().restrict_self().map_err(Error::ApplyLandlock).map_err(|e| {
+                                    error!("Error applying landlock to signal handler thread: {:?}", e);
+                                    exit_evt.write(1).ok();
+                                });
+                            }
+
                             std::panic::catch_unwind(AssertUnwindSafe(|| {
                                 Vmm::signal_handler(signals, original_termios_opt, &exit_evt);
                             }))
