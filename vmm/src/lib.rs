@@ -405,8 +405,8 @@ pub fn start_vmm_thread(
     #[cfg(feature = "guest_debug")] vm_debug_event: EventFd,
     exit_event: EventFd,
     seccomp_action: &SeccompAction,
-    landlock_enable: bool,
     hypervisor: Arc<dyn hypervisor::Hypervisor>,
+    landlock_enable: bool,
 ) -> Result<VmmThreadHandle> {
     #[cfg(feature = "guest_debug")]
     let gdb_hw_breakpoints = hypervisor.get_guest_debug_hw_bps();
@@ -667,6 +667,7 @@ impl Vmm {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new(
         vmm_version: VmmVersionInfo,
         api_evt: EventFd,
@@ -1239,12 +1240,28 @@ impl Vmm {
     }
 }
 
+fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), RulesetError> {
+    vm_config.lock().unwrap().apply_landlock()?;
+    Ok(())
+}
+
 impl RequestHandler for Vmm {
     fn vm_create(&mut self, config: Arc<Mutex<VmConfig>>) -> result::Result<(), VmError> {
         // We only store the passed VM config.
         // The VM will be created when being asked to boot it.
         if self.vm_config.is_none() {
             self.vm_config = Some(config);
+            if self
+                .vm_config
+                .as_ref()
+                .unwrap()
+                .lock()
+                .unwrap()
+                .landlock_enable
+            {
+                apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                    .map_err(VmError::ApplyLandlock)?;
+            }
             Ok(())
         } else {
             Err(VmError::VmAlreadyCreated)
