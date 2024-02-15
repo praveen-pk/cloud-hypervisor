@@ -7,6 +7,8 @@ use serde::{Deserialize, Serialize};
 use std::{net::Ipv4Addr, path::PathBuf};
 use virtio_devices::RateLimiterConfig;
 
+use crate::landlock;
+
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CpuAffinity {
     pub vcpu: u8,
@@ -582,6 +584,12 @@ pub struct TpmConfig {
     pub socket: PathBuf,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LandlockConfig {
+    pub path: PathBuf,
+    pub flags: landlock::Perms,
+}
+
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
@@ -630,4 +638,5 @@ pub struct VmConfig {
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]
     pub landlock_enable: bool,
+    pub landlock_config: Option<Vec<LandlockConfig>>,
 }
