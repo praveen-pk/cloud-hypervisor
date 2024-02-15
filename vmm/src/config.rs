@@ -3,6 +3,7 @@
 // SPDX-License-Identifier: Apache-2.0
 //
 
+use crate::landlock;
 pub use crate::vm_config::*;
 use clap::ArgMatches;
 use option_parser::{
@@ -106,6 +107,10 @@ pub enum Error {
     ParseTpm(OptionParserError),
     /// Missing path for TPM device
     ParseTpmPathMissing,
+    /// Error parsing Landlock rules
+    ParseLandlockRules(OptionParserError),
+    /// Missing fields in Landlock rules
+    ParseLandlockMissingFields,
 }
 
 #[derive(Debug, PartialEq, Eq, Error)]
@@ -195,6 +200,8 @@ pub enum ValidationError {
     InvalidIoPortHex(String),
     #[cfg(feature = "sev_snp")]
     InvalidHostData,
+    /// Path provided in landlock-rules doesn't exist
+    LandlockPathDoesNotExist(PathBuf),
 }
 
 type ValidationResult<T> = std::result::Result<T, ValidationError>;
@@ -334,6 +341,13 @@ impl fmt::Display for ValidationError {
             InvalidHostData => {
                 write!(f, "Invalid host data format")
             }
+            LandlockPathDoesNotExist(s) => {
+                write!(
+                    f,
+                    "Path {:?} provided in landlock-rules does not exist",
+                    s.as_path()
+                )
+            }
         }
     }
 }
@@ -393,6 +407,11 @@ impl fmt::Display for Error {
             ParseVdpaPathMissing => write!(f, "Error parsing --vdpa: path missing"),
             ParseTpm(o) => write!(f, "Error parsing --tpm: {o}"),
             ParseTpmPathMissing => write!(f, "Error parsing --tpm: path missing"),
+            ParseLandlockRules(o) => write!(f, "Error parsing --landlock-rules: {o}"),
+            ParseLandlockMissingFields => write!(
+                f,
+                "Error parsing --landlock-rules: path/flags field missing"
+            ),
         }
     }
 }
@@ -444,6 +463,7 @@ pub struct VmParams<'a> {
     #[cfg(feature = "sev_snp")]
     pub host_data: Option<&'a str>,
     pub landlock_enable: bool,
+    pub landlock_config: Option<Vec<&'a str>>,
 }
 
 impl<'a> VmParams<'a> {
@@ -507,6 +527,10 @@ impl<'a> VmParams<'a> {
         #[cfg(feature = "sev_snp")]
         let host_data = args.get_one::<String>("host-data").map(|x| x as &str);
         let landlock_enable = args.get_flag("landlock");
+        let landlock_config: Option<Vec<&str>> = args
+            .get_many::<String>("landlock-rules")
+            .map(|x| x.map(|y| y as &str).collect());
+
         VmParams {
             cpus,
             memory,
@@ -544,6 +568,7 @@ impl<'a> VmParams<'a> {
             #[cfg(feature = "sev_snp")]
             host_data,
             landlock_enable,
+            landlock_config,
         }
     }
 }
@@ -2103,6 +2128,51 @@ impl TpmConfig {
     }
 }
 
+impl LandlockConfig {
+    pub const SYNTAX: &'static str = "Landlock parameters \
+        \"path=<path/to/{file/dir}>,flags={r,w,x}\". Both path and flags options are required.\"";
+
+    pub fn parse(landlock_rule: &str) -> Result<Self> {
+        let mut parser = OptionParser::new();
+        parser.add("path").add("flags");
+        parser
+            .parse(landlock_rule)
+            .map_err(Error::ParseLandlockRules)?;
+
+        let path = parser
+            .get("path")
+            .map(PathBuf::from)
+            .ok_or(Error::ParseLandlockMissingFields)?;
+        let mut path_flags: u8 = 0;
+        if let Some(flags) = parser.get("flags") {
+            for c in flags.chars() {
+                match c {
+                    'r' => path_flags |= landlock::READ,
+                    'w' => path_flags |= landlock::WRITE,
+                    'x' => path_flags |= landlock::EXECUTE,
+                    _ => {
+                        return Err(Error::ParseLandlockRules(OptionParserError::UnknownOption(
+                            c.to_string(),
+                        )))
+                    }
+                }
+            }
+        }
+
+        Ok(LandlockConfig {
+            path,
+            flags: path_flags,
+        })
+    }
+
+    pub fn validate(&self, _vm_config: &VmConfig) -> ValidationResult<()> {
+        if !self.path.exists() {
+            return Err(ValidationError::LandlockPathDoesNotExist(self.path.clone()));
+        }
+        Ok(())
+    }
+}
+
 impl VmConfig {
     fn validate_identifier(
         id_list: &mut BTreeSet<String>,
@@ -2609,6 +2679,16 @@ impl VmConfig {
         #[cfg(feature = "guest_debug")]
         let gdb = vm_params.gdb;
 
+        let mut landlock_config: Option<Vec<LandlockConfig>> = None;
+        if let Some(ll_config) = vm_params.landlock_config {
+            landlock_config = Some(
+                ll_config
+                    .iter()
+                    .map(|rule| LandlockConfig::parse(rule))
+                    .collect::<Result<Vec<LandlockConfig>>>()?,
+            );
+        }
+
         let mut config = VmConfig {
             cpus: CpusConfig::parse(vm_params.cpus)?,
             memory: MemoryConfig::parse(vm_params.memory, vm_params.memory_zones)?,
@@ -2640,6 +2720,7 @@ impl VmConfig {
             tpm,
             preserved_fds: None,
             landlock_enable: vm_params.landlock_enable,
+            landlock_config,
         };
         config.validate().map_err(Error::Validation)?;
         Ok(config)
@@ -2765,6 +2846,7 @@ impl Clone for VmConfig {
                 .as_ref()
                 // SAFETY: FFI call with valid FDs
                 .map(|fds| fds.iter().map(|fd| unsafe { libc::dup(*fd) }).collect()),
+            landlock_config: self.landlock_config.clone(),
             ..*self
         }
     }
@@ -3534,6 +3616,7 @@ mod tests {
             tpm: None,
             preserved_fds: None,
             landlock_enable: false,
+            landlock_config: None,
         };
 
         assert!(valid_config.validate().is_ok());
@@ -4068,5 +4151,25 @@ mod tests {
             still_valid_config.add_preserved_fds(vec![fd1, fd2]);
         }
         let _still_valid_config = still_valid_config.clone();
+    }
+    #[test]
+    fn test_landlock_parsing() -> Result<()> {
+        // should not be empty
+        assert!(LandlockConfig::parse("").is_err());
+        assert_eq!(
+            LandlockConfig::parse("path=/dir/path1,flags=rw")?,
+            LandlockConfig {
+                path: PathBuf::from("/dir/path1"),
+                flags: landlock::READ | landlock::WRITE,
+            }
+        );
+        assert_eq!(
+            LandlockConfig::parse("path=/dir/path2,flags=x")?,
+            LandlockConfig {
+                path: PathBuf::from("/dir/path2"),
+                flags: landlock::EXECUTE,
+            }
+        );
+        Ok(())
     }
 }

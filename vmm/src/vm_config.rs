@@ -552,6 +552,12 @@ pub struct TpmConfig {
     pub socket: PathBuf,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct LandlockConfig {
+    pub path: PathBuf,
+    pub flags: u8,
+}
+
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
 pub struct VmConfig {
     #[serde(default)]
@@ -600,4 +606,5 @@ pub struct VmConfig {
     pub preserved_fds: Option<Vec<i32>>,
     #[serde(default)]
     pub landlock_enable: bool,
+    pub landlock_config: Option<Vec<LandlockConfig>>,
 }
