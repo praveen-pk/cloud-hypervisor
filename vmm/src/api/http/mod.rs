@@ -12,6 +12,7 @@ use crate::api::{
     VmReceiveMigration, VmRemoveDevice, VmResize, VmResizeZone, VmRestore, VmResume,
     VmSendMigration, VmShutdown, VmSnapshot,
 };
+use crate::landlock::Landlock;
 use crate::seccomp_filters::{get_seccomp_filter, Thread};
 use crate::{Error as VmmError, Result};
 use core::fmt;
@@ -301,6 +302,7 @@ fn start_http_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
+    landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     // Retrieve seccomp filter for API thread
     let api_seccomp_filter = get_seccomp_filter(seccomp_action, Thread::HttpApi, hypervisor_type)
@@ -322,6 +324,18 @@ fn start_http_thread(
                     .map_err(VmmError::ApplySeccompFilter)
                     .map_err(|e| {
                         error!("Error applying seccomp filter: {:?}", e);
+                        exit_evt.write(1).ok();
+                        e
+                    })?;
+            }
+
+            if landlock_enable {
+                Landlock::new()
+                    .unwrap()
+                    .restrict_self()
+                    .map_err(VmmError::ApplyLandlock)
+                    .map_err(|e| {
+                        error!("Error applying landlock to http-server thread: {:?}", e);
                         exit_evt.write(1).ok();
                         e
                     })?;
@@ -373,6 +387,7 @@ pub fn start_http_path_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
+    landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     let socket_path = PathBuf::from(path);
     let socket_fd = UnixListener::bind(socket_path).map_err(VmmError::CreateApiServerSocket)?;
@@ -387,6 +402,7 @@ pub fn start_http_path_thread(
         seccomp_action,
         exit_evt,
         hypervisor_type,
+        landlock_enable,
     )
 }
 
@@ -397,6 +413,7 @@ pub fn start_http_fd_thread(
     seccomp_action: &SeccompAction,
     exit_evt: EventFd,
     hypervisor_type: HypervisorType,
+    landlock_enable: bool,
 ) -> Result<HttpApiHandle> {
     // SAFETY: Valid FD
     let server = unsafe { HttpServer::new_from_fd(fd) }.map_err(VmmError::CreateApiServer)?;
@@ -407,6 +424,7 @@ pub fn start_http_fd_thread(
         seccomp_action,
         exit_evt,
         hypervisor_type,
+        landlock_enable,
     )
 }
 
