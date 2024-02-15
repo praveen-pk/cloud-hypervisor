@@ -486,6 +486,7 @@ pub fn start_vmm_thread(
             seccomp_action,
             exit_event,
             hypervisor_type,
+            landlock_enable,
         )?)
     } else if let Some(http_fd) = http_fd {
         Some(api::start_http_fd_thread(
@@ -495,6 +496,7 @@ pub fn start_vmm_thread(
             seccomp_action,
             exit_event,
             hypervisor_type,
+            landlock_enable,
         )?)
     } else {
         None
