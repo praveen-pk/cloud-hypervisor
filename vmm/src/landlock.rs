@@ -30,6 +30,10 @@ pub enum LandlockError {
     /// Error opening path
     #[error("Error opening path: {0}")]
     OpenPath(#[source] IoError),
+
+    /// Invalid Path
+    #[error("Invalid path")]
+    InvalidPath,
 }
 // https://docs.rs/landlock/latest/landlock/enum.ABI.html for more info on ABI
 static ABI: ABI = ABI::V3;
