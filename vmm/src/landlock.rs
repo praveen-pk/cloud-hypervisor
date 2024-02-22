@@ -6,6 +6,7 @@ use landlock::{
     path_beneath_rules, Access, AccessFs, BitFlags, PathFdError, Ruleset, RulesetAttr,
     RulesetCreated, RulesetCreatedAttr, RulesetError, ABI,
 };
+use std::io::Error as IoError;
 use std::path::PathBuf;
 use thiserror::Error;
 
@@ -36,6 +37,10 @@ pub enum LandlockError {
     /// Error opening Path
     #[error("Error opening Path: {0}")]
     OpenPath(#[source] PathFdError),
+
+    /// Error opening Device Path
+    #[error("Error opening Device Path: {0}")]
+    OpenDevicePath(#[source] IoError),
 }
 
 pub struct Landlock {
