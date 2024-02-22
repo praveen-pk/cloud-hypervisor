@@ -30,6 +30,10 @@ pub enum LandlockError {
     /// Error opening Device Path
     #[error("Error opening path: {0}")]
     OpenPath(#[source] IoError),
+
+    /// Invalid Path
+    #[error("Invalid path")]
+    InvalidPath,
 }
 
 static ABI: ABI = ABI::V3;
