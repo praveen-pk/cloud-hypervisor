@@ -1228,6 +1228,7 @@ pub struct GuestCommand<'a> {
     capture_output: bool,
     print_cmd: bool,
     verbosity: VerbosityLevel,
+    landlock: bool,
 }
 
 impl<'a> GuestCommand<'a> {
@@ -1242,6 +1243,7 @@ impl<'a> GuestCommand<'a> {
             capture_output: false,
             print_cmd: true,
             verbosity: VerbosityLevel::Info,
+            landlock: false,
         }
     }
 
@@ -1260,6 +1262,11 @@ impl<'a> GuestCommand<'a> {
         self
     }
 
+    pub fn enable_landlock(&mut self) -> &mut Self {
+        self.landlock = true;
+        self
+    }
+
     pub fn spawn(&mut self) -> io::Result<Child> {
         use VerbosityLevel::*;
         match &self.verbosity {
@@ -1271,6 +1278,10 @@ impl<'a> GuestCommand<'a> {
                 self.command.args(["-vv"]);
             }
         };
+
+        if self.landlock {
+            self.command.arg("--landlock");
+        }
 
         if self.print_cmd {
             println!(
