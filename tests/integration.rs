@@ -5673,11 +5673,22 @@ mod common_parallel {
 
         let mut cmd = GuestCommand::new(&guest);
 
+        let pmem_temp_file = TempFile::new().unwrap();
+        pmem_temp_file.as_file().set_len(128 << 20).unwrap();
+
         cmd.args(["--api-socket", &api_socket])
             .args(["--cpus", "boot=1"])
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--landlock-rules",
+                format!(
+                    "path={:?},flags=rw",
+                    pmem_temp_file.as_path().to_str().unwrap()
+                )
+                .as_str(),
+            ])
             .default_disks()
             .default_net()
             .capture_output();
@@ -5705,8 +5716,6 @@ mod common_parallel {
                 0
             );
 
-            let pmem_temp_file = TempFile::new().unwrap();
-            pmem_temp_file.as_file().set_len(128 << 20).unwrap();
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-pmem",
