@@ -1279,9 +1279,7 @@ impl<'a> GuestCommand<'a> {
             }
         };
 
-        if self.landlock {
             self.command.arg("--landlock");
-        }
 
         if self.print_cmd {
             println!(
