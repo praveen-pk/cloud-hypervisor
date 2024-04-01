@@ -5159,6 +5159,10 @@ mod common_parallel {
         let kernel_path = edk2_path();
 
         let api_socket = temp_api_path(&guest.tmp_dir);
+        //Hotplugged disk path
+        let mut blk_file_path = dirs::home_dir().unwrap();
+        blk_file_path.push("workloads");
+        blk_file_path.push("blk.img");
 
         let mut child = GuestCommand::new(&guest)
             .args(["--api-socket", &api_socket])
@@ -5166,6 +5170,7 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", kernel_path.to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--landlock-rules", format!("path={:?},flags=rw", blk_file_path.as_path().to_str().unwrap()).as_str()])
             .default_disks()
             .default_net()
             .capture_output()
@@ -5186,10 +5191,6 @@ mod common_parallel {
                 0
             );
 
-            // Now let's add the extra disk.
-            let mut blk_file_path = dirs::home_dir().unwrap();
-            blk_file_path.push("workloads");
-            blk_file_path.push("blk.img");
             let (cmd_success, cmd_output) = remote_command_w_output(
                 &api_socket,
                 "add-disk",
