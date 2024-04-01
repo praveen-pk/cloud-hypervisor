@@ -4332,6 +4332,10 @@ mod common_parallel {
             .args(["--memory", "size=512M"])
             .args(["--kernel", direct_kernel_boot_path().to_str().unwrap()])
             .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args([
+                "--landlock-rules",
+                format!("path={:?},flags=rw", console_path.to_str().unwrap()).as_str(),
+            ])
             .default_disks()
             .default_net()
             .args([
