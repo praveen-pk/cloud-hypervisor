@@ -29,6 +29,7 @@ use anyhow::anyhow;
 #[cfg(feature = "dbus_api")]
 use api::dbus::{DBusApiOptions, DBusApiShutdownChannels};
 use api::http::HttpApiHandle;
+use device_manager::create_pty;
 use landlock::LandlockError;
 use libc::{tcsetattr, termios, EFD_NONBLOCK, SIGINT, SIGTERM, TCSANOW};
 use memory_manager::MemoryManagerSnapshotData;
@@ -41,6 +42,7 @@ use std::collections::HashMap;
 use std::fs::File;
 use std::io;
 use std::io::{stdout, Read, Write};
+use std::os::fd::IntoRawFd;
 use std::os::unix::io::{AsRawFd, FromRawFd, RawFd};
 use std::os::unix::net::UnixListener;
 use std::os::unix::net::UnixStream;
@@ -53,6 +55,7 @@ use std::time::Instant;
 use std::{result, thread};
 use thiserror::Error;
 use tracer::trace_scoped;
+use vm_config::ConsoleOutputMode;
 use vm_memory::bitmap::AtomicBitmap;
 use vm_memory::{ReadVolatile, WriteVolatile};
 use vm_migration::{protocol::*, Migratable};
@@ -1240,7 +1243,37 @@ impl Vmm {
     }
 }
 
+/* Create ptys here and add the slave paths to Serial, Console and DebugConsole
+    configs. This allows apply_landlok to add the slave paths to landlock rules
+    later.
+*/
+fn create_ptys(config: Arc<Mutex<VmConfig>>) -> result::Result<(), LandlockError> {
+    if config.lock().unwrap().console.mode == ConsoleOutputMode::Pty {
+        let (main_fd, sub_fd, path) = create_pty().map_err(LandlockError::CreatePtysFailed)?;
+        config.lock().unwrap().console.pty_main = Some(main_fd.into_raw_fd());
+        config.lock().unwrap().console.pty_sub = Some(sub_fd.into_raw_fd());
+        config.lock().unwrap().console.file = Some(path);
+    }
+
+    if config.lock().unwrap().serial.mode == ConsoleOutputMode::Pty {
+        let (main_fd, sub_fd, path) = create_pty().map_err(LandlockError::CreatePtysFailed)?;
+        config.lock().unwrap().serial.pty_main = Some(main_fd.into_raw_fd());
+        config.lock().unwrap().serial.pty_sub = Some(sub_fd.into_raw_fd());
+        config.lock().unwrap().serial.file = Some(path);
+    }
+    #[cfg(target_arch = "x86_64")]
+    if config.lock().unwrap().debug_console.mode == ConsoleOutputMode::Pty {
+        let (main_fd, sub_fd, path) = create_pty().map_err(LandlockError::CreatePtysFailed)?;
+        config.lock().unwrap().debug_console.pty_main = Some(main_fd.into_raw_fd());
+        config.lock().unwrap().debug_console.pty_sub = Some(sub_fd.into_raw_fd());
+        config.lock().unwrap().debug_console.file = Some(path);
+    }
+
+    Ok(())
+}
+
 fn apply_landlock(vm_config: Arc<Mutex<VmConfig>>) -> result::Result<(), LandlockError> {
+    create_ptys(vm_config.clone())?;
     vm_config.lock().unwrap().apply_landlock()?;
     Ok(())
 }
@@ -1259,7 +1292,7 @@ impl RequestHandler for Vmm {
                 .unwrap()
                 .landlock_enable
             {
-                apply_landlock(self.vm_config.as_ref().unwrap().clone())
+                apply_landlock(self.vm_config.as_mut().unwrap().clone())
                     .map_err(VmError::ApplyLandlock)?;
             }
             Ok(())
@@ -2196,12 +2229,16 @@ mod unit_tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),

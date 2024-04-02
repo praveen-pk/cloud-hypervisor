@@ -34,6 +34,9 @@ pub enum LandlockError {
     /// Invalid Path
     #[error("Invalid path")]
     InvalidPath,
+
+    #[error("Error creating ptys")]
+    CreatePtysFailed(#[source] std::io::Error),
 }
 
 static ABI: ABI = ABI::V3;

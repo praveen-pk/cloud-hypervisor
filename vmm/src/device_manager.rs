@@ -493,6 +493,9 @@ pub enum DeviceManagerError {
 
     /// Cannot create a RateLimiterGroup
     RateLimiterGroupCreate(rate_limiter::group::Error),
+
+    // Missing Pty device info
+    MissingPtyDeviceInfo,
 }
 
 pub type DeviceManagerResult<T> = result::Result<T, DeviceManagerError>;
@@ -2059,16 +2062,24 @@ impl DeviceManager {
                     self.console_resize_pipe = resize_pipe.map(Arc::new);
                     Endpoint::PtyPair(file.try_clone().unwrap(), file)
                 } else {
-                    let (main, sub, path) =
-                        create_pty().map_err(DeviceManagerError::ConsolePtyOpen)?;
-                    self.set_raw_mode(&sub)
-                        .map_err(DeviceManagerError::SetPtyRaw)?;
-                    self.config.lock().unwrap().console.file = Some(path.clone());
-                    let file = main.try_clone().unwrap();
-                    assert!(resize_pipe.is_none());
-                    self.listen_for_sigwinch_on_tty(sub).unwrap();
-                    self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
-                    Endpoint::PtyPair(file.try_clone().unwrap(), file)
+                    /* In non-reboot cases pty should be configured in vm_create/vm_restore */
+                    if console_config.pty_main.is_none()
+                        || console_config.pty_sub.is_none()
+                        || console_config.file.is_none()
+                    {
+                        return Err(DeviceManagerError::MissingPtyDeviceInfo);
+                    } else {
+                        let main = unsafe { File::from_raw_fd(console_config.pty_main.unwrap()) };
+                        let sub = unsafe { File::from_raw_fd(console_config.pty_sub.unwrap()) };
+                        let path = console_config.file.unwrap().clone();
+                        self.set_raw_mode(&sub)
+                            .map_err(DeviceManagerError::SetPtyRaw)?;
+                        let file = main.try_clone().unwrap();
+                        assert!(resize_pipe.is_none());
+                        self.listen_for_sigwinch_on_tty(sub).unwrap();
+                        self.console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
+                        Endpoint::PtyPair(file.try_clone().unwrap(), file)
+                    }
                 }
             }
             ConsoleOutputMode::Tty => {
@@ -2184,12 +2195,20 @@ impl DeviceManager {
                     self.config.lock().unwrap().serial.file = Some(pty.path.clone());
                     self.serial_pty = Some(Arc::new(Mutex::new(pty)));
                 } else {
-                    let (main, sub, path) =
-                        create_pty().map_err(DeviceManagerError::SerialPtyOpen)?;
-                    self.set_raw_mode(&sub)
-                        .map_err(DeviceManagerError::SetPtyRaw)?;
-                    self.config.lock().unwrap().serial.file = Some(path.clone());
-                    self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
+                    /* In non-reboot cases pty should be configured in vm_create/vm_restore */
+                    if serial_config.pty_main.is_none()
+                        || serial_config.pty_sub.is_none()
+                        || serial_config.file.is_none()
+                    {
+                        return Err(DeviceManagerError::MissingPtyDeviceInfo);
+                    } else {
+                        let main = unsafe { File::from_raw_fd(serial_config.pty_main.unwrap()) };
+                        let sub = unsafe { File::from_raw_fd(serial_config.pty_sub.unwrap()) };
+                        let path = serial_config.file.unwrap().clone();
+                        self.set_raw_mode(&sub)
+                            .map_err(DeviceManagerError::SetPtyRaw)?;
+                        self.serial_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
+                    }
                 }
                 None
             }
@@ -2243,12 +2262,24 @@ impl DeviceManager {
                         self.config.lock().unwrap().debug_console.file = Some(pty.path.clone());
                         self.debug_console_pty = Some(Arc::new(Mutex::new(pty)));
                     } else {
-                        let (main, sub, path) =
-                            create_pty().map_err(DeviceManagerError::DebugconPtyOpen)?;
-                        self.set_raw_mode(&sub)
-                            .map_err(DeviceManagerError::SetPtyRaw)?;
-                        self.config.lock().unwrap().debug_console.file = Some(path.clone());
-                        self.debug_console_pty = Some(Arc::new(Mutex::new(PtyPair { main, path })));
+                        /* In non-reboot cases pty should be configured in vm_create/vm_restore */
+                        if debug_console_config.pty_main.is_none()
+                            || debug_console_config.pty_sub.is_none()
+                            || debug_console_config.file.is_none()
+                        {
+                            return Err(DeviceManagerError::MissingPtyDeviceInfo);
+                        } else {
+                            let main = unsafe {
+                                File::from_raw_fd(debug_console_config.pty_main.unwrap())
+                            };
+                            let sub =
+                                unsafe { File::from_raw_fd(debug_console_config.pty_sub.unwrap()) };
+                            let path = debug_console_config.file.unwrap().clone();
+                            self.set_raw_mode(&sub)
+                                .map_err(DeviceManagerError::SetPtyRaw)?;
+                            self.debug_console_pty =
+                                Some(Arc::new(Mutex::new(PtyPair { main, path })));
+                        }
                     }
                     None
                 }

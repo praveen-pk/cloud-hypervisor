@@ -8,7 +8,7 @@ use crate::{
 };
 use net_util::MacAddr;
 use serde::{Deserialize, Serialize};
-use std::{fs, net::Ipv4Addr, path::PathBuf, result};
+use std::{fs, net::Ipv4Addr, os::fd::RawFd, path::PathBuf, result};
 use virtio_devices::RateLimiterConfig;
 
 pub type LandlockResult<T> = result::Result<T, LandlockError>;
@@ -478,6 +478,9 @@ pub struct ConsoleConfig {
     #[serde(default)]
     pub iommu: bool,
     pub socket: Option<PathBuf>,
+    #[serde(skip)]
+    pub pty_main: Option<RawFd>,
+    pub pty_sub: Option<RawFd>,
 }
 
 pub fn default_consoleconfig_file() -> Option<PathBuf> {
@@ -506,6 +509,9 @@ pub struct DebugConsoleConfig {
     pub mode: ConsoleOutputMode,
     /// Optionally dedicated I/O-port, if the default port should not be used.
     pub iobase: Option<u16>,
+    #[serde(skip)]
+    pub pty_main: Option<RawFd>,
+    pub pty_sub: Option<RawFd>,
 }
 
 #[cfg(target_arch = "x86_64")]
@@ -515,6 +521,8 @@ impl Default for DebugConsoleConfig {
             file: None,
             mode: ConsoleOutputMode::Off,
             iobase: Some(devices::debug_console::DEFAULT_PORT as u16),
+            pty_main: None,
+            pty_sub: None,
         }
     }
 }
@@ -703,6 +711,8 @@ pub fn default_serial() -> ConsoleConfig {
         mode: ConsoleOutputMode::Null,
         iommu: false,
         socket: None,
+        pty_main: None,
+        pty_sub: None,
     }
 }
 
@@ -712,6 +722,8 @@ pub fn default_console() -> ConsoleConfig {
         mode: ConsoleOutputMode::Tty,
         iommu: false,
         socket: None,
+        pty_main: None,
+        pty_sub: None,
     }
 }
 

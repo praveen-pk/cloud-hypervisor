@@ -1711,6 +1711,8 @@ impl ConsoleConfig {
             mode,
             iommu,
             socket,
+            pty_main: None,
+            pty_sub: None,
         })
     }
 }
@@ -1764,7 +1766,13 @@ impl DebugConsoleConfig {
             }
         }
 
-        Ok(Self { file, mode, iobase })
+        Ok(Self {
+            file,
+            mode,
+            iobase,
+            pty_main: None,
+            pty_sub: None,
+        })
     }
 }
 
@@ -3349,6 +3357,8 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3358,6 +3368,8 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3367,6 +3379,8 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3376,6 +3390,8 @@ mod tests {
                 iommu: false,
                 file: None,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3385,6 +3401,8 @@ mod tests {
                 iommu: false,
                 file: Some(PathBuf::from("/tmp/console")),
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3394,6 +3412,8 @@ mod tests {
                 iommu: true,
                 file: None,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3403,6 +3423,8 @@ mod tests {
                 iommu: true,
                 file: Some(PathBuf::from("/tmp/console")),
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             }
         );
         assert_eq!(
@@ -3412,6 +3434,8 @@ mod tests {
                 iommu: true,
                 file: None,
                 socket: Some(PathBuf::from("/tmp/serial.sock")),
+                pty_main: None,
+                pty_sub: None,
             }
         );
         Ok(())
@@ -3596,12 +3620,16 @@ mod tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),

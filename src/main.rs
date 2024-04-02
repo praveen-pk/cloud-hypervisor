@@ -935,12 +935,16 @@ mod unit_tests {
                 mode: ConsoleOutputMode::Null,
                 iommu: false,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             },
             console: ConsoleConfig {
                 file: None,
                 mode: ConsoleOutputMode::Tty,
                 iommu: false,
                 socket: None,
+                pty_main: None,
+                pty_sub: None,
             },
             #[cfg(target_arch = "x86_64")]
             debug_console: DebugConsoleConfig::default(),
