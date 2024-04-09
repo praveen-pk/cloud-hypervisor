@@ -1273,7 +1273,7 @@ impl<'a> GuestCommand<'a> {
                 self.command.args(["-vv"]);
             }
         };
-
+        self.command.arg("--landlock");
         if self.print_cmd {
             println!(
                 "\n\n==== Start cloud-hypervisor command-line ====\n\n\
