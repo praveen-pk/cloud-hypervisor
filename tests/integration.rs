@@ -5149,6 +5149,231 @@ mod common_parallel {
     }
 
     #[test]
+    // This test runs a guest with Landlock enabled and hotplugs a new disk. As
+    // the path for the hotplug disk is not pre-added to Landlock rules, this
+    // the test will result in a failure.
+    fn test_landlock() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--landlock"])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check /dev/vdc is not there
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            // Now let's add the extra disk.
+            let mut blk_file_path = dirs::home_dir().unwrap();
+            blk_file_path.push("workloads");
+            blk_file_path.push("blk.img");
+            let cmd_fail = remote_command(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            );
+            // This will fail, as the path for the hotplug disk is not pre-added
+            assert!(!cmd_fail);
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+
+
+        handle_child_output(r, &output);
+    }
+
+    #[test]
+    fn test_landlock_with_rules() {
+        let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
+        let guest = Guest::new(Box::new(focal));
+
+        #[cfg(target_arch = "x86_64")]
+        let kernel_path = direct_kernel_boot_path();
+        #[cfg(target_arch = "aarch64")]
+        let kernel_path = edk2_path();
+
+        let api_socket = temp_api_path(&guest.tmp_dir);
+
+        let mut blk_file_path = dirs::home_dir().unwrap();
+        blk_file_path.push("workloads");
+        blk_file_path.push("blk.img");
+
+        let mut child = GuestCommand::new(&guest)
+            .args(["--api-socket", &api_socket])
+            .args(["--cpus", "boot=1"])
+            .args(["--memory", "size=512M"])
+            .args(["--kernel", kernel_path.to_str().unwrap()])
+            .args(["--cmdline", DIRECT_KERNEL_BOOT_CMDLINE])
+            .args(["--landlock"])
+            .args(["--landlock-rules",format!("path={:?},flags=rw",blk_file_path).as_str()])
+            .default_disks()
+            .default_net()
+            .capture_output()
+            .spawn()
+            .unwrap();
+
+        let r = std::panic::catch_unwind(|| {
+            guest.wait_vm_boot(None).unwrap();
+
+            // Check /dev/vdc is not there
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            // Now let's add the extra disk.
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            );
+            assert!(cmd_success);
+            assert!(String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check that /dev/vdc exists and the block size is 16M.
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+            // And check the block device can be read.
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+
+            // Let's remove it the extra disk.
+            assert!(remote_command(&api_socket, "remove-device", Some("test0")));
+            thread::sleep(std::time::Duration::new(5, 0));
+            // And check /dev/vdc is not there
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            // And add it back to validate unplug did work correctly.
+            let (cmd_success, cmd_output) = remote_command_w_output(
+                &api_socket,
+                "add-disk",
+                Some(format!("path={},id=test0", blk_file_path.to_str().unwrap()).as_str()),
+            );
+            assert!(cmd_success);
+            assert!(String::from_utf8_lossy(&cmd_output)
+                .contains("{\"id\":\"test0\",\"bdf\":\"0000:00:06.0\"}"));
+
+            thread::sleep(std::time::Duration::new(10, 0));
+
+            // Check that /dev/vdc exists and the block size is 16M.
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+            // And check the block device can be read.
+            guest
+                .ssh_command("sudo dd if=/dev/vdc of=/dev/null bs=1M iflag=direct count=16")
+                .unwrap();
+
+            // Reboot the VM.
+            guest.reboot_linux(0, None);
+
+            // Check still there after reboot
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep vdc | grep -c 16M")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or_default(),
+                1
+            );
+
+            assert!(remote_command(&api_socket, "remove-device", Some("test0")));
+
+            thread::sleep(std::time::Duration::new(20, 0));
+
+            // Check device has gone away
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+
+            guest.reboot_linux(1, None);
+
+            // Check device still absent
+            assert_eq!(
+                guest
+                    .ssh_command("lsblk | grep -c vdc.*16M || true")
+                    .unwrap()
+                    .trim()
+                    .parse::<u32>()
+                    .unwrap_or(1),
+                0
+            );
+        });
+
+        let _ = child.kill();
+        let output = child.wait_with_output().unwrap();
+
+        handle_child_output(r, &output);
+    }
+
+
+    #[test]
     fn test_disk_hotplug() {
         let focal = UbuntuDiskConfig::new(FOCAL_IMAGE_NAME.to_string());
         let guest = Guest::new(Box::new(focal));
