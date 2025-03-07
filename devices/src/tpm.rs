@@ -415,9 +415,9 @@ impl BusDevice for Tpm {
                 return None;
             }
 
-            let mut input: [u8; 4] = [0; 4];
-            input.copy_from_slice(&data[0..4]);
-            let v = u32::from_le_bytes(input);
+            let mut input = vec![0; 4];
+            input[0..data.len()].copy_from_slice(&data[0..data.len()]);
+            let v = u32::from_le_bytes(input.try_into().expect("slice with incorrect length"));
 
             match offset {
                 CRB_CTRL_CMD_SIZE_REG => {
